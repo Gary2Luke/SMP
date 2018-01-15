@@ -3,9 +3,7 @@
 set(CPI_SOURCES cpi.c)
 set(CPI_INLINES cpi_inlines.c)
 set(CPI_DEPENDS cpi.h
-    common.h common.c common_inlines.c
-    hashtable.h hashtable.c hashtable_inlines.c
-    lookuptable.h lookuptable.c lookuptable_inlines.c
+    common.h common.c common_inlines.c    
     simpletable.h simpletable.c simpletable_inlines.c)
 
 include_directories(..)

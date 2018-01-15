@@ -43,21 +43,17 @@ const tbl_entry *__llvm__cpi_get(void **ptr_address) {
 
 /*** Interface function ***/
 __CPI_INLINE
-__llvm__cpi_bounds __llvm__cpi_assert(void **ptr_address, void *ptr_value,
-                                 char *loc) {
+__llvm__cpi_bounds __llvm__cpi_assert(void **ptr_address, void *ptr_value) {
 
-  DEBUG("[CPI] Check [%p] : %p (%s)\n", ptr_address, ptr_value, loc);
+  DEBUG("[CPI] Check [%p] : %p \n", ptr_address, ptr_value);
 
   size_t off = tbl_offset(ptr_address);
   void *tbl_value = (void*) __CPI_TBL_GET(off);
 
   // If the pointer value does not match -> fail!
   if (CPI_EXPECTNOT(tbl_value != ptr_value)) {
-#ifdef CPI_VERBOSE_ERRORS
-    __llvm__cpi_assert_fail(ptr_address, ptr_value, loc);
-#else
     __llvm__cpi_assert_fail();
-#endif
+
   }
 
 // Return bounds if pointer values matched

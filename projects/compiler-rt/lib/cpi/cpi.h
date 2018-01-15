@@ -155,8 +155,7 @@ __CPI_INLINE void __llvm__cpi_set(void **fptr, void *val);
 __CPI_INLINE void __llvm__cpi_set_bounds(void **fptr, void *val,
                                          __llvm__cpi_bounds bounds);
 
-__CPI_INLINE __llvm__cpi_bounds __llvm__cpi_assert(void **fptr, void *val,
-                                                   char *loc);
+__CPI_INLINE __llvm__cpi_bounds __llvm__cpi_assert(void **fptr, void *val);
 
 __CPI_INLINE void *__llvm__cpi_get_metadata(void **fptr);
 __CPI_INLINE void *__llvm__cpi_get_metadata_nocheck(void **fptr);
