@@ -279,7 +279,7 @@ namespace {
         PrintStat(outs(), NumAllocFreeOps);
         PrintStat(outs(), NumProtectedAllocFreeOps);
 
-	    PrintStat(outs(), NumReturnAddress);
+	PrintStat(outs(), NumReturnAddress);
       }
 
       return true;
@@ -605,6 +605,39 @@ bool CPI::shouldProtectValue(Value *Val, bool IsStore,
                                                   Type *RealTy) {
   return shouldProtectType(RealTy ? RealTy : Val->getType(),
                            IsStore, CPSOnly, TBAATag);
+}
+
+static Constant *InsertInstructionLocStr(Instruction *I) {
+  LLVMContext &C = I->getContext();
+  Module &M = *I->getParent()->getParent()->getParent();
+  std::string s;
+  raw_string_ostream os(s);
+
+  os << I->getParent()->getParent()->getName();
+
+  DebugLoc DL = I->getDebugLoc();
+  if (!DL.isUnknown()) {
+    os << " (at " << DIScope(DL.getScope(C)).getFilename()
+       << ":" << DL.getLine();
+    if (DL.getCol()) os << ":" << DL.getCol();
+    for (DebugLoc InlinedAtDL = DL;;) {
+      InlinedAtDL = DebugLoc::getFromDILocation(InlinedAtDL.getInlinedAt(C));
+      if (InlinedAtDL.isUnknown())
+        break;
+      os << ", inlined at ";
+      os << DIScope(InlinedAtDL.getScope(C)).getFilename()
+         << ":" << InlinedAtDL.getLine();
+      if (InlinedAtDL.getCol()) os << ":" << InlinedAtDL.getCol();
+    }
+    os << ")";
+  }
+
+  Constant *Str = ConstantDataArray::getString(C, os.str());
+  GlobalVariable *GV = new GlobalVariable(M, Str->getType(), true,
+                                          GlobalValue::InternalLinkage,
+                                          Str, "__llvm__cpi_debug_str");
+  GV->setUnnamedAddr(true);
+  return ConstantExpr::getPointerCast(GV, Type::getInt8PtrTy(M.getContext()));
 }
 
 bool CPI::doCPIInitialization(Module &M) {
@@ -998,7 +1031,7 @@ void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
               IRB.CreatePointerCast(LI->getPointerOperand(),
                                     IRB.getInt8PtrTy()->getPointerTo()),
               IRB.CreatePointerCast(LI, IRB.getInt8PtrTy()),
-              NULL);
+              InsertInstructionLocStr(LI));
      
     }
 
@@ -1533,7 +1566,7 @@ bool CPI::runOnFunction(Function &F) {
 	  Value *Val = B.CreateBitCast(RetAddr, Int8PtrTy);		  	  
           B.CreateCall2(IF.CPISetFn, Loc, Val);
 	  IRBuilder<> Builder2(RI);	  
-	  Builder2.CreateCall3(IF.CPIAssertFn, Loc, Val, NULL);
+	  Builder2.CreateCall3(IF.CPIAssertFn, Loc, Val, InsertInstructionLocStr(RI));
 	 // Value *const222 = Builder2.getInt64(0x0);
 	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");	
 	  ++NumReturnAddress;
