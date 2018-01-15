@@ -53,7 +53,7 @@
 // Uncomment the following to enable the runtime stats collection
 // instrumentation. Remember to enable in cpi.cc in compiler-rt as well
 // Both switches must be active or not at the same time!
-//#define CPI_PROFILE_STATS
+
 
 using namespace llvm;
 
@@ -128,9 +128,7 @@ namespace {
     Function *CPIReallocFn;
     Function *CPIFreeFn;
 
-#ifdef CPI_PROFILE_STATS
-    Function *CPIRegisterProfileTable;
-#endif
+
 
     Function *CPIDumpFn;
   };
@@ -183,19 +181,13 @@ namespace {
                             MDNode *TBAATag = NULL, Type *RealType = NULL);
 
     // Check whether storage location pointed to by Ptr needs protection
-    bool shouldProtectLoc(Value *Ptr, bool IsStore);
-
-    
-    bool isUsedInProtectContext(Value *Ptr, bool CPSOnly);
+    bool shouldProtectLoc(Value *Ptr, bool IsStore);    
 
     void buildMetadataReload(IRBuilder<true, TargetFolder> &IRB, Value *VPtr,
                              Value *EndPtr, BasicBlock *ExitBB, Value *PPt);
 
     void buildMetadataReloadLoop(IRBuilder<true, TargetFolder> &IRB,
                                  Value *VPtr, Value *Size, Value *PPt);
-
-    /// Create bounds with a given base and size
-    Value *createBounds(IRBuilder<> &IRB, Value *Base, Value *Size);
 
     void insertChecks(DenseMap<Value*, Value*> &BM,
                       Value *V, bool IsDereferenced,
@@ -249,12 +241,7 @@ namespace {
 
       IntPtrTy = DL->getIntPtrType(M.getContext());
       BoundsTy = VectorType::get(IntPtrTy, 2);
-      PtrValBoundsTy = StructType::get(IntPtrTy, IntPtrTy, BoundsTy, NULL);
-
-      uint64_t InftyBoundsArr[2] = { 0ULL, ~0ULL };
-      uint64_t EmptyBoundsArr[2] = { ~0ULL, 0ULL };
-      InftyBounds = ConstantDataVector::get(M.getContext(), InftyBoundsArr);
-      EmptyBounds = ConstantDataVector::get(M.getContext(), EmptyBoundsArr);
+      PtrValBoundsTy = StructType::get(IntPtrTy, IntPtrTy, BoundsTy, NULL);      
 
       doCPIInitialization(M);
 
@@ -266,10 +253,10 @@ namespace {
 
       for (Module::iterator It = M.begin(), Ie = M.end(); It != Ie; ++It) {
         Function &F = *It;
-        //if (!F.isDeclaration() && !F.getName().startswith("llvm.") &&
-            //!F.getName().startswith("__llvm__")) {
+        if (!F.isDeclaration() && !F.getName().startswith("llvm.") &&
+            !F.getName().startswith("__llvm__")) {
           runOnFunction(F);
-        //}
+        }
       }
 
       doCPIFinalization(M);
@@ -292,131 +279,11 @@ namespace {
         PrintStat(outs(), NumAllocFreeOps);
         PrintStat(outs(), NumProtectedAllocFreeOps);
 
-	PrintStat(outs(), NumReturnAddress);
+	    PrintStat(outs(), NumReturnAddress);
       }
 
       return true;
     }
-
-#ifdef CPI_PROFILE_STATS
-  private:
-    GlobalVariable *ProfileTable;
-    std::vector<std::string> ProfileNames;
-
-
-    bool doStatsInitialization(Module &M) {
-      // We don't know the size of the array, hence we have to use indirection
-      LLVMContext &Ctx = M.getContext();
-      Type *STy = StructType::get(Type::getInt64Ty(Ctx),
-                                  Type::getInt8PtrTy(Ctx), NULL);
-      ProfileTable = new GlobalVariable(M, STy, false,
-                                        GlobalValue::InternalLinkage, NULL);
-      return true;
-    }
-
-    template<typename _IRBuilder>
-    Value *insertProfilePoint(_IRBuilder &IRB, Instruction *I,
-                              Twine Kind, Value *Num = NULL) {
-      size_t n = ProfileNames.size();
-      Value *Idx[2] = { IRB.getInt64(n), IRB.getInt32(0) };
-      Value *P = IRB.CreateGEP(ProfileTable, Idx);
-
-      Value *Inc = Num ? IRB.CreateZExt(Num, IRB.getInt64Ty())
-                       : IRB.getInt64(1);
-      IRB.CreateAtomicRMW(AtomicRMWInst::Add, P, Inc, Monotonic);
-
-      std::string _s; raw_string_ostream os(_s);
-      os << I->getParent()->getParent()->getName() << "\t";
-
-      DebugLoc DL = I->getDebugLoc();
-      if (DL.isUnknown()) os << "?" << n;
-      else {
-        os << DIScope(DL.getScope(I->getContext())).getFilename()
-           << ":" << DL.getLine() << ":" << DL.getCol();
-        for (DebugLoc InlinedAtDL = DL;;) {
-          InlinedAtDL = DebugLoc::getFromDILocation(
-                InlinedAtDL.getInlinedAt(I->getContext()));
-          if (InlinedAtDL.isUnknown())
-            break;
-          os << " @ ";
-          os << DIScope(InlinedAtDL.getScope(I->getContext())).getFilename()
-             << ":" << InlinedAtDL.getLine() << ":" << InlinedAtDL.getCol();
-        }
-      }
-
-      os << "\t" << Kind;
-      ProfileNames.push_back(os.str());
-
-      return P;
-    }
-
-    template<typename _IRBuilder>
-    void incrementProfilePoint(_IRBuilder &IRB, Value *P) {
-      IRB.CreateAtomicRMW(AtomicRMWInst::Add, P, IRB.getInt64(1), Monotonic);
-    }
-
-    bool doStatsFinalization(Module &M) {
-      // Create the profile table
-      LLVMContext &Ctx = M.getContext();
-      Type *Int64Ty = Type::getInt64Ty(Ctx);
-      Type *VoidPtrTy = Type::getInt8PtrTy(Ctx);
-
-      StructType *PfItemTy = StructType::get(Int64Ty, VoidPtrTy, NULL);
-      ArrayType *PfArrayTy = ArrayType::get(PfItemTy, ProfileNames.size());
-
-      SmallVector<Constant*, 32> PfArrayArgs;
-
-      for (size_t i = 0; i < ProfileNames.size(); ++i) {
-        Constant *Str = ConstantDataArray::getString(Ctx, ProfileNames[i]);
-        GlobalVariable *GV = new GlobalVariable(M, Str->getType(), true,
-                                                GlobalValue::InternalLinkage,
-                                                Str);
-        GV->setUnnamedAddr(true);
-
-        Constant* A[] = {
-          ConstantInt::get(Int64Ty, 0),
-          ConstantExpr::getPointerCast(GV, VoidPtrTy)
-        };
-
-        PfArrayArgs.push_back(ConstantStruct::get(PfItemTy, A));
-      }
-
-      GlobalVariable *PfArray =
-          new GlobalVariable(M, PfArrayTy, false,
-                             GlobalValue::PrivateLinkage,
-                             ConstantArray::get(PfArrayTy, PfArrayArgs),
-                             "__llvm__cpi_module_profile_table");
-
-      ProfileTable->replaceAllUsesWith(
-          ConstantExpr::getBitCast(PfArray, PfItemTy->getPointerTo()));
-      ProfileTable->eraseFromParent();
-
-      // Create ctor function
-      Function *F = Function::Create(
-          FunctionType::get(Type::getVoidTy(Ctx), false),
-          GlobalValue::InternalLinkage, "__llvm__cpi_module_profile_ctor", &M);
-
-      SmallVector<Value*, 2> Args;
-      Args.push_back(ConstantExpr::getBitCast(PfArray, VoidPtrTy));
-      Args.push_back(ConstantInt::get(Int64Ty, ProfileNames.size()));
-
-      BasicBlock *BB = BasicBlock::Create(Ctx, Twine(), F);
-      CallInst::Create(IF.CPIRegisterProfileTable, Args, Twine(), BB);
-      ReturnInst::Create(Ctx, BB);
-
-      appendToGlobalCtors(M, F, 9999);
-
-      return true;
-    }
-#else
-    template<class _IRBuilder>
-    Value *insertProfilePoint(_IRBuilder&, Instruction*,
-                              Twine, Value* V = NULL) { return NULL; }
-    template<typename _IRBuilder>
-    void incrementProfilePoint(_IRBuilder&, Value*) {}
-    bool doStatsInitialization(Module &M) { return false; }
-    bool doStatsFinalization(Module &M) { return false; }
-#endif
   };
 } // end anonymous namespace
 
@@ -456,11 +323,7 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
 
   IF.CPIAssertFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_assert", BoundsTy, Int8PtrPtrTy,
-      Int8PtrTy, Int8PtrTy, NULL));   
-
-  
-
-  
+      Int8PtrTy, Int8PtrTy, NULL)); 
 
   IF.CPIDeleteRangeFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_delete_range", VoidTy, Int8PtrTy, SizeTy, NULL));
@@ -484,10 +347,6 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
   IF.CPIFreeFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_free", VoidTy, Int8PtrTy, NULL));
 
-#ifdef CPI_PROFILE_STATS
-  IF.CPIRegisterProfileTable = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_register_profile_table", VoidTy, Int8PtrTy, SizeTy, NULL));
-#endif
 
   IF.CPIDumpFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_dump", VoidTy, Int8PtrPtrTy, NULL));
@@ -748,42 +607,8 @@ bool CPI::shouldProtectValue(Value *Val, bool IsStore,
                            IsStore, CPSOnly, TBAATag);
 }
 
-static Constant *InsertInstructionLocStr(Instruction *I) {
-  LLVMContext &C = I->getContext();
-  Module &M = *I->getParent()->getParent()->getParent();
-  std::string s;
-  raw_string_ostream os(s);
-
-  os << I->getParent()->getParent()->getName();
-
-  DebugLoc DL = I->getDebugLoc();
-  if (!DL.isUnknown()) {
-    os << " (at " << DIScope(DL.getScope(C)).getFilename()
-       << ":" << DL.getLine();
-    if (DL.getCol()) os << ":" << DL.getCol();
-    for (DebugLoc InlinedAtDL = DL;;) {
-      InlinedAtDL = DebugLoc::getFromDILocation(InlinedAtDL.getInlinedAt(C));
-      if (InlinedAtDL.isUnknown())
-        break;
-      os << ", inlined at ";
-      os << DIScope(InlinedAtDL.getScope(C)).getFilename()
-         << ":" << InlinedAtDL.getLine();
-      if (InlinedAtDL.getCol()) os << ":" << InlinedAtDL.getCol();
-    }
-    os << ")";
-  }
-
-  Constant *Str = ConstantDataArray::getString(C, os.str());
-  GlobalVariable *GV = new GlobalVariable(M, Str->getType(), true,
-                                          GlobalValue::InternalLinkage,
-                                          Str, "__llvm__cpi_debug_str");
-  GV->setUnnamedAddr(true);
-  return ConstantExpr::getPointerCast(GV, Type::getInt8PtrTy(M.getContext()));
-}
-
 bool CPI::doCPIInitialization(Module &M) {
-  CreateCPIInterfaceFunctions(DL, M, IF);
-  doStatsInitialization(M);
+  CreateCPIInterfaceFunctions(DL, M, IF);  
   return true;
 }
 
@@ -875,7 +700,7 @@ void CPI::buildMetadataReload(
       }
     }
 
-    if (PPt) incrementProfilePoint(IRB, PPt);
+   // if (PPt) incrementProfilePoint(IRB, PPt);
 
     IRB.CreateCall2(IF.CPISetFn,
         IRB.CreatePointerCast(VPtr, IRB.getInt8PtrTy()->getPointerTo()),
@@ -1017,21 +842,7 @@ void CPI::buildMetadataReloadLoop(
 
 static Type *guessRealValueType(Value *VPtr, Function *F) {
   // Look through the data flow upwards
-#if 0
-  for (Value *V1 = VPtr;; V1 = cast<Operator>(V1)->getOperand(0)) {
-    if (PointerType *Ty = dyn_cast<PointerType>(V1->getType())) {
-      if (!Ty->getElementType()->isIntegerTy(8) &&
-          !Ty->getElementType()->isFunctionTy() &&
-          Ty->getElementType()->isSized()) {
-        return Ty->getElementType();
-      }
-    }
-    // FIXME: support GEP
-    if (!isa<Operator>(V1) ||
-        cast<Operator>(V1)->getOpcode() != Instruction::BitCast)
-      break;
-  }
-#endif
+
   Value *V1 = VPtr;
   do {
     PointerType *Ty = dyn_cast<PointerType>(V1->getType());
@@ -1159,52 +970,6 @@ static bool isUsedAsFPtr(Value *FPtr) {
   return false;
 }
 
-bool CPI::isUsedInProtectContext(Value *Ptr, bool
-                                                      CPSOnly) {
-
-  SmallPtrSet<Value*, 16> Visited;
-  SmallVector<Value*, 16> WorkList;
-  Visited.insert(Ptr);
-  WorkList.push_back(Ptr);
-
-  while (!WorkList.empty()) {
-    Value *Val = WorkList.pop_back_val();
-    for (Value::use_iterator It = Val->use_begin(),
-                             Ie = Val->use_end(); It != Ie; ++It) {
-      User *U = *It;
-      if (CastInst *CI = dyn_cast<CastInst>(U)) {
-        if (PointerType *PTy = dyn_cast<PointerType>(CI->getType()))
-          if (shouldProtectType(PTy, false, CPSOnly))
-            return true; // cast to another function pointer type
-      } else if (isa<CmpInst>(U)) {
-        continue;
-      } else if (isa<PHINode>(U) || isa<SelectInst>(U)) {
-        if (Visited.insert(U))
-          WorkList.push_back(U);
-      } else {
-        // Any non-cast instruction
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-
-
-Value *CPI::createBounds(IRBuilder<> &IRB,
-                                              Value *Base, Value *Size) {
-  Base = IRB.CreatePtrToInt(Base, IntPtrTy);
-  Value *Last = IRB.CreateSub(
-    IRB.CreateAdd(Base, IRB.CreateIntCast(Size, IntPtrTy, false)),
-    ConstantInt::get(IntPtrTy, 1));
-  Value *R = UndefValue::get(BoundsTy);
-  R = IRB.CreateInsertElement(R, Base, IRB.getInt32(0));
-  R = IRB.CreateInsertElement(R, Last, IRB.getInt32(1));
-  return R;
-}
-
 void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
         Value *V, bool IsDereferenced,
         SetVector<std::pair<Instruction*, Instruction*> > &ReplMap) {
@@ -1226,15 +991,14 @@ void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
       ++NumProtectedLoads;
       IRBuilder<> IRB(LI->getNextNode());
       IRB.SetCurrentDebugLocation(LI->getDebugLoc());
-      insertProfilePoint(IRB, LI,
-              (!CPIDebugMode && IsDereferenced) ? "load-nocheck" : "load-full");
+      //insertProfilePoint(IRB, LI, "load-full");
 
       
         IRB.CreateCall3(IF.CPIAssertFn,
               IRB.CreatePointerCast(LI->getPointerOperand(),
                                     IRB.getInt8PtrTy()->getPointerTo()),
               IRB.CreatePointerCast(LI, IRB.getInt8PtrTy()),
-              InsertInstructionLocStr(LI));
+              NULL);
      
     }
 
@@ -1435,7 +1199,7 @@ bool CPI::runOnFunction(Function &F) {
   // Add stab values and bounds stores
   for (unsigned i = 0, e = BoundsSTabStores.size(); i != e; ++i) {
     IRBuilder<> IRB(BoundsSTabStores[i].first);
-    insertProfilePoint(IRB, BoundsSTabStores[i].first, "store");
+    //insertProfilePoint(IRB, BoundsSTabStores[i].first, "store");
 
     Value *Loc = IRB.CreateBitCast(BoundsSTabStores[i].second.first,
                                    Int8PtrPtrTy);
@@ -1569,7 +1333,7 @@ bool CPI::runOnFunction(Function &F) {
           ++NumProtectedMemcpyLikeOps;
 
           IRBuilder<> IRB(CI->getNextNode());
-          IRB.SetCurrentDebugLocation(CI->getDebugLoc());
+          //IRB.SetCurrentDebugLocation(CI->getDebugLoc());
 
           Type *Int8PtrTy = IRB.getInt8PtrTy();
 
@@ -1579,24 +1343,24 @@ bool CPI::runOnFunction(Function &F) {
             SizeTy = IRB.getInt32Ty();
 
           if (IsBZero) {
-            insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(1));
+           // insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(1));
             IRB.CreateCall2(IF.CPIDeleteRangeFn,
                   IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
                   IRB.CreateZExt(CI->getArgOperand(1), SizeTy));
           } else if (IsMemSet) {
-            insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
+            //insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
             IRB.CreateCall2(IF.CPIDeleteRangeFn,
                   IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
                   IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
           } else if (IsMemCpy) {
-            insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
+            //insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
             IRB.CreateCall3(IF.CPICopyRangeFn,
                   IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
                   IRB.CreatePointerCast(CI->getArgOperand(1), Int8PtrTy),
                   IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
           } else {
             assert(IsMemMove || IsBCopy);
-            insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
+            //insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
             IRB.CreateCall3(IF.CPIMoveRangeFn,
                   IRB.CreatePointerCast(DstOp, Int8PtrTy),
                   IRB.CreatePointerCast(SrcOp, Int8PtrTy),
@@ -1617,13 +1381,14 @@ bool CPI::runOnFunction(Function &F) {
           TargetFolder TF(DL);
           IRBuilder<true, TargetFolder> IRB(C, TF);
           IRB.SetInsertPoint(CI->getNextNode());
-          IRB.SetCurrentDebugLocation(CI->getDebugLoc());
+          //IRB.SetCurrentDebugLocation(CI->getDebugLoc());
 
           Value *RealOp = IRB.CreateBitCast(DstOp,
                     r1 ? RealTy->getPointerTo() : RealTy2->getPointerTo());
           Value *Size = CI->getArgOperand(IsBZero ? 1 : 2);
-          Value *PPt = insertProfilePoint(IRB, CI, N+"-ty-loop",
-                                          IRB.getInt64(0));
+		  Value *PPt = NULL;
+          //Value *PPt = insertProfilePoint(IRB, CI, N+"-ty-loop",
+                                          //IRB.getInt64(0));
           buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
           It.getBasicBlockIterator() = IRB.GetInsertBlock();
           It.getInstructionIterator() = IRB.GetInsertPoint();
@@ -1635,7 +1400,7 @@ bool CPI::runOnFunction(Function &F) {
       TargetFolder TF(DL);
       IRBuilder<true, TargetFolder> IRB(C, TF);
       IRB.SetInsertPoint(CI->getNextNode());
-      IRB.SetCurrentDebugLocation(CI->getDebugLoc());
+      //IRB.SetCurrentDebugLocation(CI->getDebugLoc());
 
       Type *RealTy = guessRealValueType(CI, &F);
 
@@ -1644,19 +1409,16 @@ bool CPI::runOnFunction(Function &F) {
         Value *RealOp = IRB.CreateBitCast(CI, RealTy->getPointerTo());
         Value *Size = IRB.CreateMul(CI->getArgOperand(0),
                                     CI->getArgOperand(1));
-        Value *PPt = insertProfilePoint(IRB, CI,
-                                        "calloc-ty-loop", IRB.getInt64(0));
+		Value *PPt = NULL;
+        //Value *PPt = insertProfilePoint(IRB, CI,
+                                       // "calloc-ty-loop", IRB.getInt64(0));
         buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
         It.getBasicBlockIterator() = IRB.GetInsertBlock();
         It.getInstructionIterator() = IRB.GetInsertPoint();
 
       } else if (!RealTy) {
         ++NumProtectedAllocFreeOps;
-#ifdef CPI_PROFILE_STATS
-        insertProfilePoint(IRB, CI, "calloc",
-                           IRB.CreateMul(CI->getArgOperand(0),
-                                         CI->getArgOperand(1)));
-#endif
+
 
 #warning Pass real size
         IRB.CreateCall(IF.CPIAllocFn,
@@ -1681,8 +1443,9 @@ bool CPI::runOnFunction(Function &F) {
 
         Value *RealOp = IRB.CreateBitCast(CI, RealTy->getPointerTo());
         Value *Size = CI->getArgOperand(1);
-        Value *PPt = insertProfilePoint(IRB, CI,
-                                        "realloc-ty-loop", IRB.getInt64(0));
+		Value *PPt = NULL;
+        //Value *PPt = insertProfilePoint(IRB, CI,
+                                       // "realloc-ty-loop", IRB.getInt64(0));
         buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
         It.getBasicBlockIterator() = IRB.GetInsertBlock();
         It.getInstructionIterator() = IRB.GetInsertPoint();
@@ -1698,7 +1461,7 @@ bool CPI::runOnFunction(Function &F) {
         IRB.SetInsertPoint(CI->getNextNode());
         IRB.SetCurrentDebugLocation(CI->getDebugLoc());
 
-        insertProfilePoint(IRB, CI, "realloc", CI->getArgOperand(1));
+        //insertProfilePoint(IRB, CI, "realloc", CI->getArgOperand(1));
         IRB.CreateCall4(IF.CPIReallocFn, CI, CI->getArgOperand(1),
                         CI->getArgOperand(0), SizeOld);
       }
@@ -1720,10 +1483,10 @@ bool CPI::runOnFunction(Function &F) {
               IRB.CreateICmpNE(Ptr, Constant::getNullValue(Ptr->getType())),
               NotNullBB, NextBB);
 
-        IRB.SetInsertPoint(NotNullBB, NotNullBB->begin());
+        //IRB.SetInsertPoint(NotNullBB, NotNullBB->begin());
         CondBB->back().eraseFromParent();
-
-        Value *PPt = insertProfilePoint(IRB, CI, N + "-fixup");
+		Value *PPt = NULL;
+        //Value *PPt = insertProfilePoint(IRB, CI, N + "-fixup");
         buildMetadataReload(IRB, Ptr, NULL, NULL, PPt);
         It.getBasicBlockIterator() = NextBB;
         It.getInstructionIterator() = NextI;
@@ -1751,21 +1514,11 @@ bool CPI::runOnFunction(Function &F) {
       continue;
 
     ++NumProtectedStores;
-    if (!PPt)
-      PPt = insertProfilePoint(IRB, F.getEntryBlock().getFirstNonPHI(),
-                               "byval-args", IRB.getInt64(0));
 
     buildMetadataReload(IRB, A, NULL, NULL, PPt);
   }
 
-  // Finally, replace all loads from ReplMap
-  if (!CPIDebugMode) {
-    for (unsigned i = 0, e = ReplMap.size(); i != e; ++i) {
-      Instruction *From = ReplMap[i].first, *To = ReplMap[i].second;
-      To->takeName(From);
-      From->replaceAllUsesWith(To);
-    }
-  }
+ 
 /*  /shadow stack failed??*/
 
     for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
@@ -1780,7 +1533,7 @@ bool CPI::runOnFunction(Function &F) {
 	  Value *Val = B.CreateBitCast(RetAddr, Int8PtrTy);		  	  
           B.CreateCall2(IF.CPISetFn, Loc, Val);
 	  IRBuilder<> Builder2(RI);	  
-	  Builder2.CreateCall3(IF.CPIAssertFn, Loc, Val, InsertInstructionLocStr(RI));
+	  Builder2.CreateCall3(IF.CPIAssertFn, Loc, Val, NULL);
 	 // Value *const222 = Builder2.getInt64(0x0);
 	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");	
 	  ++NumReturnAddress;
@@ -1811,8 +1564,8 @@ Function *CPI::createGlobalsReload(Module &M, StringRef N,
   IRB.CreateCall(IF.CPIDumpFn, IRB.CreateIntToPtr(IRB.getInt64(0),
                                            IRB.getInt8PtrTy()->getPointerTo()));
                                            */
-
-  Value *PPt = insertProfilePoint(IRB, CI, "globals", IRB.getInt64(0));
+	  Value *PPt = NULL;
+  //Value *PPt = insertProfilePoint(IRB, CI, "globals", IRB.getInt64(0));
 
   IRB.CreateRetVoid();
   IRB.SetInsertPoint(IRB.GetInsertBlock(),
@@ -1865,6 +1618,6 @@ bool CPI::doCPIFinalization(Module &M) {
     }
   }
 
-  doStatsFinalization(M);
+  
   return true;
 }
