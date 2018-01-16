@@ -251,7 +251,7 @@ namespace {
         if (!F.isDeclaration() && !F.getName().startswith("llvm.") &&
             !F.getName().startswith("__llvm__")) {
           runOnFunction(F);
-        }
+        }	
       }
 
       doCPIFinalization(M);
@@ -1595,17 +1595,31 @@ bool CPI::runOnFunction(Function &F) {
 	  ReturnInst *RI = dyn_cast<ReturnInst>(BB->getTerminator());
 	  if (!RI)
 		continue;
-	  IRBuilder<> B(&F.getEntryBlock().front());
-	  Value *RetAddr = B.CreateCall(Intrinsic::getDeclaration(MM, Intrinsic::returnaddress),B.getInt32(0), "returnaddr");
-	  Value *Loc = B.CreateBitCast(RetAddr, Int8PtrPtrTy);
-	  Value *Val = B.CreateBitCast(RetAddr, Int8PtrTy);		  	  
-          B.CreateCall2(IF.CPISetFn, Loc, Val);
+	  IRBuilder<> B2(&F.getEntryBlock().front());
+	  Value *RetAddr = B2.CreateCall(Intrinsic::getDeclaration(MM, Intrinsic::returnaddress),B2.getInt32(0), "returnaddr");
+	  Value *Loc = B2.CreateBitCast(RetAddr, Int8PtrPtrTy);
+	  Value *Val = B2.CreateBitCast(RetAddr, Int8PtrTy);		  	  
+          B2.CreateCall2(IF.CPISetFn, Loc, Val);
+
 	  IRBuilder<> Builder2(RI);	  
 	  Builder2.CreateCall2(IF.CPIAssertFn, Loc, Val);
-	 // Value *const222 = Builder2.getInt64(0x0);
-	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");	
+	  	
 	  ++NumReturnAddress;
+	/*有问题 一个函数插桩的返回地址检查不止一个？？？？*/
+/*
+	  StringRef AsmStore = "addq $$0x8, %fs:0x28\n\t";// this stack grows up
+ 	  StringRef ConStore = "";
+ 	  FunctionType* FtStore = FunctionType::get(Type::getVoidTy(F.getContext()),{}, false);
+ 	  InlineAsm* Store = InlineAsm::get(FtStore, AsmStore, ConStore, false, false, InlineAsm::AD_ATT);
+ 	  Builder2.CreateCall(Store);
+          */
+
+	/*不能清0，会出错（例如一个函数调用自己）*/
 	  //errs().write_escaped(F.getName()) << "  ret" << '\n';
+	  //Value *const222 = Builder2.getInt64(0x0);
+	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");
+	  //Builder2.CreateCall2(IF.CPISetFn, Loc, Val222);
+	  break;
    }
           
  
