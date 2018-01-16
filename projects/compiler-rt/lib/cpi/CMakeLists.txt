@@ -2,8 +2,7 @@
 
 set(CPI_SOURCES cpi.c)
 set(CPI_INLINES cpi_inlines.c)
-set(CPI_DEPENDS cpi.h
-    common.h common.c common_inlines.c    
+set(CPI_DEPENDS cpi.h    
     simpletable.h simpletable.c simpletable_inlines.c)
 
 include_directories(..)

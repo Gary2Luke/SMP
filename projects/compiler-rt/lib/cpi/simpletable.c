@@ -7,15 +7,9 @@
 #include "simpletable.h"
 #include <stdio.h>
 
-//-----------------------------------------------
-// Globals
-//-----------------------------------------------
-#if defined(__gnu_linux__)
 # include <asm/prctl.h>
 # include <sys/prctl.h>
-#elif defined(__FreeBSD__)
-# include <machine/sysarch.h>
-#endif
+
 
 int __llvm__cpi_inited = 0;
 void* __llvm__cpi_table = 0;
@@ -41,60 +35,22 @@ void __llvm__cpi_init() {
     perror("Cannot map __llvm__cpi_dir");
     abort();
   }
-
-# if defined(__gnu_linux__)
+  
   int res = arch_prctl(ARCH_SET_GS, __llvm__cpi_table);
   if (res != 0) {
     perror("arch_prctl failed");
     abort();
   }
-# elif defined(__FreeBSD__)
-  int res = amd64_set_gsbase(__llvm__cpi_table);
-  if (res != 0) {
-    perror("arch_prctl failed");
-    abort();
-  }
-# endif
-
   DEBUG("[CPI] Initialization completed\n");
-
   return;
 }
 
 __attribute__((destructor(0)))
 __CPI_EXPORT
 void __llvm__cpi_destroy(void) {
-#ifdef CPI_PROFILE_STATS
-    __llvm__cpi_profile_statistic();
-#endif
   DEBUG("[CPI] Finalizatoin completed\n");
 }
 
-// =============================================
-// Debug functions
-// =============================================
-
-/*** Interface function ***/
-__CPI_EXPORT
-void __llvm__cpi_dump(void **ptr_address) {
-
-  tbl_entry *entry = tbl_address(ptr_address);
-
-  fprintf(stderr, "Pointer  address: %p\n", ptr_address);
-  if (ptr_address)
-    fprintf(stderr, "Pointer  value  : %p\n", *ptr_address);
-
-  if (!entry) {
-    fprintf(stderr, "No entry for address: %p\n", ptr_address);
-  } else {
-    fprintf(stderr, "Metadata address: %p\n", entry);
-    fprintf(stderr, "Metadata value  : %p\n", entry->ptr_value);
-#ifdef CPI_BOUNDS
-    fprintf(stderr, "Lower bound:    : 0x%lx\n", entry->bounds[0]);
-    fprintf(stderr, "Upper bound:    : 0x%lx\n", entry->bounds[1]);
-#endif
-  }
-}
 
 // =============================================
 // Deletion functions
@@ -177,4 +133,44 @@ void __llvm__cpi_move_range(unsigned char *dst, unsigned char *src,
           (src_end - src) * tbl_entry_size_mult);
 }
 
-// ---------------------------------------------
+
+// =============================================
+// Memory management related functions
+// =============================================
+
+/*** Interface function ***/
+__CPI_EXPORT
+void __llvm__cpi_realloc(unsigned char *fptr_new, unsigned long size_new,
+                         unsigned char *fptr_old, unsigned long size_old) {
+    if (CPI_EXPECTNOT(fptr_old == NULL || fptr_new == NULL)) {
+        return;
+    } else if (fptr_old == fptr_new) {
+
+#ifdef CPI_DELETE_ON_ALLOC
+        /*
+        if (size_new > size_old) // enlarge
+            __llvm__cpi_delete_range(fptr_old + size_new, size_old - size_new);
+        */
+#endif
+    } else { // data was moved
+        __llvm__cpi_move_range(fptr_new, fptr_old,
+                               size_old < size_new ? size_old : size_new);
+    }
+}
+
+
+// =============================================
+// Failure reporting functions
+// =============================================
+
+__CPI_EXPORT __CPI_NOINLINE
+    __attribute__((noreturn))
+    void __llvm__cpi_assert_fail() {
+
+  fprintf(stderr, "CPI check fail\n");
+  abort();
+
+}
+
+
+

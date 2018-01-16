@@ -1,22 +1,15 @@
-#ifndef CPI_LOOKUP_TABLE_H
-#define CPI_LOOKUP_TABLE_H
+#ifndef CPI_SIMPLE_TABLE_H
+#define CPI_SIMPLE_TABLE_H
 
 #include "cpi.h"
 
 //-----------------------------------------------
 // Type definitions
 //-----------------------------------------------
-#ifdef CPI_BOUNDS
-typedef struct {
-  void *ptr_value;
-  void *reserved;
-  __llvm__cpi_bounds bounds;
-} tbl_entry;
-#else
+
 typedef struct {
   void *ptr_value;
 } tbl_entry;
-#endif
 
 //-----------------------------------------------
 // Constants
@@ -38,14 +31,6 @@ typedef struct {
 #  define CPI_ADDR_MASK (0x00fffffffff8ull) // this is ((1<<40)-1)&~7
 #  define CPI_TABLE_NUM_ENTRIES (1ull<<(40 - 3))
 #  define CPI_TABLE_ADDR (1ull<<45)
-# elif defined(__FreeBSD__)
-#  define CPI_ADDR_MASK (0x00fffffffff8ull) // this is ((1<<40)-1)&~7
-#  define CPI_TABLE_NUM_ENTRIES (1ull<<(40 - 3))
-#  define CPI_TABLE_ADDR (1ull<<45)
-# elif defined(__APPLE__)
-#  define CPI_ADDR_MASK (0x00fffffffff8ull) // this is ((1<<40)-1)&~7
-#  define CPI_TABLE_NUM_ENTRIES (1ull<<(40 - 3))
-#  define CPI_TABLE_ADDR (1ull<<45)
 # else
 #  error Not implemented yet
 # endif
@@ -62,11 +47,8 @@ typedef struct {
 // =============================================
 extern int __llvm__cpi_inited;
 
-#if defined(__FreeBSD__) || defined(__APPLE__)
-# define IMM_MODE "er"
-#else
+
 # define IMM_MODE "ir"
-#endif
 
 # define __CPI_TBL_GET(off)    \
   ({ size_t val;                \
@@ -81,18 +63,7 @@ extern int __llvm__cpi_inited;
                          "r" (off));                  \
   } while(0)
 
-# define __CPI_TBL_GET2(off, b)      \
-  ({ size_t val;                      \
-      __asm__ volatile ("movq %%gs:%P2(%1),%0" \
-               : "=r" (val)           \
-               : "r" (off), "i" (b)); \
-     val; })
 
-# define __CPI_TBL_SET2(off, b, val)             \
-  do { __asm__ volatile ("movq %0,%%gs:%P2(%1)" : \
-                         : IMM_MODE (val),        \
-                         "r" (off), "i" (b));     \
-  } while(0)
 
 //-----------------------------------------------
 // Helper functions for indexing
@@ -103,4 +74,4 @@ extern int __llvm__cpi_inited;
 #define tbl_address(ptr_address) \
   ((tbl_entry*) (((char*) __llvm__cpi_table) + tbl_offset(ptr_address)))
 
-#endif // CPI_LOOKUP_TABLE_H
+#endif // CPI_SIMPLE_TABLE_H

@@ -13,7 +13,6 @@
 
 #define DEBUG_TYPE "cpi"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/SafeStack.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -126,11 +125,7 @@ namespace {
     Function *CPIMallocSizeFn;
     Function *CPIAllocFn;
     Function *CPIReallocFn;
-    Function *CPIFreeFn;
 
-
-
-    Function *CPIDumpFn;
   };
 
   class CPIPrepare : public ModulePass {
@@ -308,12 +303,8 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
   Type *Int8PtrTy = Type::getInt8PtrTy(C);
   Type *Int8PtrPtrTy = Int8PtrTy->getPointerTo();
 
-  Type *Int32Ty = Type::getInt32Ty(C);
   Type *IntPtrTy = DL->getIntPtrType(C);
-  Type *SizeTy = IntPtrTy;
-
-  Type *BoundsTy = VectorType::get(IntPtrTy, 2);
-  //Type *PtrValBoundsTy = StructType::get(IntPtrTy, IntPtrTy, BoundsTy, NULL);
+  Type *SizeTy = IntPtrTy;  
 
   IF.CPIInitFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_init", VoidTy, NULL));
@@ -322,7 +313,7 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
       "__llvm__cpi_set", VoidTy, Int8PtrPtrTy, Int8PtrTy, NULL));
 
   IF.CPIAssertFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_assert", BoundsTy, Int8PtrPtrTy,
+      "__llvm__cpi_assert", VoidTy, Int8PtrPtrTy,
       Int8PtrTy, NULL)); 
 
   IF.CPIDeleteRangeFn = CheckInterfaceFunction(M.getOrInsertFunction(
@@ -344,12 +335,6 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
       "__llvm__cpi_realloc", VoidTy, Int8PtrTy, SizeTy,
                                      Int8PtrTy, SizeTy, NULL));
 
-  IF.CPIFreeFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_free", VoidTy, Int8PtrTy, NULL));
-
-
-  IF.CPIDumpFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_dump", VoidTy, Int8PtrPtrTy, NULL));
 }
 
 bool CPIPrepare::runOnModule(Module &M) {
@@ -542,6 +527,107 @@ bool CPI::shouldProtectType(Type *Ty, bool IsStore,
   }
 }
 
+/// Check whether a given alloca instructino (AI) should be put on the safe
+/// stack or not. The function analyzes all uses of AI and checks whether it is
+/// only accessed in a memory safe way (as decided statically).
+bool IsSafeStackAlloca(AllocaInst *AI, DataLayout *) {
+  // Go through all uses of this alloca and check whether all accesses to the
+  // allocated object are statically known to be memory safe and, hence, the
+  // object can be placed on the safe stack.
+
+  SmallPtrSet<Value*, 16> Visited;
+  SmallVector<Instruction*, 8> WorkList;
+  WorkList.push_back(AI);
+
+  // A DFS search through all uses of the alloca in bitcasts/PHI/GEPs/etc.
+  while (!WorkList.empty()) {
+    Instruction *V = WorkList.pop_back_val();
+    for (Value::use_iterator UI = V->use_begin(),
+                             UE = V->use_end(); UI != UE; ++UI) {
+      Use *U = &UI.getUse();
+      Instruction *I = cast<Instruction>(U->getUser());
+      assert(V == U->get());
+
+      switch (I->getOpcode()) {
+      case Instruction::Load:
+        // Loading from a pointer is safe
+        break;
+      case Instruction::VAArg:
+        // "va-arg" from a pointer is safe
+        break;
+      case Instruction::Store:
+        if (V == I->getOperand(0))
+          // Stored the pointer - conservatively assume it may be unsafe
+          return false;
+        // Storing to the pointee is safe
+        break;
+
+      case Instruction::GetElementPtr:
+        if (!cast<GetElementPtrInst>(I)->hasAllConstantIndices())
+          // GEP with non-constant indices can lead to memory errors
+          return false;
+
+        // We assume that GEP on static alloca with constant indices is safe,
+        // otherwise a compiler would detect it and warn during compilation.
+
+        if (!isa<ConstantInt>(AI->getArraySize()))
+          // However, if the array size itself is not constant, the access
+          // might still be unsafe at runtime.
+          return false;
+
+        /* fallthough */
+
+      case Instruction::BitCast:
+      case Instruction::PHI:
+      case Instruction::Select:
+        // The object can be safe or not, depending on how the result of the
+        // BitCast/PHI/Select/GEP/etc. is used.
+        if (Visited.insert(I))
+          WorkList.push_back(cast<Instruction>(I));
+        break;
+
+      case Instruction::Call:
+      case Instruction::Invoke: {
+        CallSite CS(I);
+
+        // Given we don't care about information leak attacks at this point,
+        // the object is considered safe if a pointer to it is passed to a
+        // function that only reads memory nor returns any value. This function
+        // can neither do unsafe writes itself nor capture the pointer (or
+        // return it) to do unsafe writes to it elsewhere. The function also
+        // shouldn't unwind (a readonly function can leak bits by throwing an
+        // exception or not depending on the input value).
+        if (CS.onlyReadsMemory() /* && CS.doesNotThrow()*/ &&
+            I->getType()->isVoidTy())
+          continue;
+
+        // LLVM 'nocapture' attribute is only set for arguments whose address
+        // is not stored, passed around, or used in any other non-trivial way.
+        // We assume that passing a pointer to an object as a 'nocapture'
+        // argument is safe.
+        // FIXME: a more precise solution would require an interprocedural
+        // analysis here, which would look at all uses of an argument inside
+        // the function being called.
+        CallSite::arg_iterator B = CS.arg_begin(), E = CS.arg_end();
+        for (CallSite::arg_iterator A = B; A != E; ++A)
+          if (A->get() == V && !CS.doesNotCapture(A - B))
+            // The parameter is not marked 'nocapture' - unsafe
+            return false;
+        continue;
+      }
+
+      default:
+        // The object is unsafe if it is used in any other way.
+        return false;
+      }
+    }
+  }
+
+  // All uses of the alloca are safe, we can place it on the safe stack.
+  return true;
+}
+
+
 bool CPI::shouldProtectLoc(Value *Loc, bool IsStore) {
   if (!IsStore && AA->pointsToConstantMemory(Loc))
     return false; // Do not protect loads from constant memory
@@ -569,10 +655,10 @@ bool CPI::shouldProtectLoc(Value *Loc, bool IsStore) {
     }
 
     if (AllocaInst *AI = dyn_cast<AllocaInst>(P)) {
-      if (!IsSafeStackAlloca(AI, DL)) {
+      //if (!IsSafeStackAlloca(AI, DL)) {
         // Pointers on unsafe stack must be instrumented
-        return true;
-      }
+        //return true;
+      //}
 
       // Pointers on the safe stack can never be overwritten, no need to
       // instrument them.
@@ -700,8 +786,7 @@ void CPI::buildMetadataReload(
       }
     }
 
-   // if (PPt) incrementProfilePoint(IRB, PPt);
-
+  
     IRB.CreateCall2(IF.CPISetFn,
         IRB.CreatePointerCast(VPtr, IRB.getInt8PtrTy()->getPointerTo()),
         IRB.CreatePointerCast(IRB.CreateLoad(VPtr), IRB.getInt8PtrTy()));
@@ -991,9 +1076,7 @@ void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
       ++NumProtectedLoads;
       IRBuilder<> IRB(LI->getNextNode());
       IRB.SetCurrentDebugLocation(LI->getDebugLoc());
-      //insertProfilePoint(IRB, LI, "load-full");
-
-      
+            
         IRB.CreateCall2(IF.CPIAssertFn,
               IRB.CreatePointerCast(LI->getPointerOperand(),
                                     IRB.getInt8PtrTy()->getPointerTo()),
@@ -1198,8 +1281,7 @@ bool CPI::runOnFunction(Function &F) {
   // Add stab values and bounds stores
   for (unsigned i = 0, e = BoundsSTabStores.size(); i != e; ++i) {
     IRBuilder<> IRB(BoundsSTabStores[i].first);
-    //insertProfilePoint(IRB, BoundsSTabStores[i].first, "store");
-
+    
     Value *Loc = IRB.CreateBitCast(BoundsSTabStores[i].second.first,
                                    Int8PtrPtrTy);
     Value *Val = IRB.CreateBitCast(BoundsSTabStores[i].second.second,
@@ -1341,25 +1423,21 @@ bool CPI::runOnFunction(Function &F) {
           if (TargetTriple.isArch32Bit())
             SizeTy = IRB.getInt32Ty();
 
-          if (IsBZero) {
-           // insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(1));
+          if (IsBZero) {           
             IRB.CreateCall2(IF.CPIDeleteRangeFn,
                   IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
                   IRB.CreateZExt(CI->getArgOperand(1), SizeTy));
           } else if (IsMemSet) {
-            //insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
             IRB.CreateCall2(IF.CPIDeleteRangeFn,
                   IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
                   IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
-          } else if (IsMemCpy) {
-            //insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
+          } else if (IsMemCpy) {            
             IRB.CreateCall3(IF.CPICopyRangeFn,
                   IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
                   IRB.CreatePointerCast(CI->getArgOperand(1), Int8PtrTy),
                   IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
           } else {
-            assert(IsMemMove || IsBCopy);
-            //insertProfilePoint(IRB, CI, N+"-full", CI->getArgOperand(2));
+            assert(IsMemMove || IsBCopy);            
             IRB.CreateCall3(IF.CPIMoveRangeFn,
                   IRB.CreatePointerCast(DstOp, Int8PtrTy),
                   IRB.CreatePointerCast(SrcOp, Int8PtrTy),
@@ -1385,9 +1463,7 @@ bool CPI::runOnFunction(Function &F) {
           Value *RealOp = IRB.CreateBitCast(DstOp,
                     r1 ? RealTy->getPointerTo() : RealTy2->getPointerTo());
           Value *Size = CI->getArgOperand(IsBZero ? 1 : 2);
-		  Value *PPt = NULL;
-          //Value *PPt = insertProfilePoint(IRB, CI, N+"-ty-loop",
-                                          //IRB.getInt64(0));
+		  Value *PPt = NULL;          
           buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
           It.getBasicBlockIterator() = IRB.GetInsertBlock();
           It.getInstructionIterator() = IRB.GetInsertPoint();
@@ -1408,9 +1484,7 @@ bool CPI::runOnFunction(Function &F) {
         Value *RealOp = IRB.CreateBitCast(CI, RealTy->getPointerTo());
         Value *Size = IRB.CreateMul(CI->getArgOperand(0),
                                     CI->getArgOperand(1));
-		Value *PPt = NULL;
-        //Value *PPt = insertProfilePoint(IRB, CI,
-                                       // "calloc-ty-loop", IRB.getInt64(0));
+		Value *PPt = NULL;        
         buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
         It.getBasicBlockIterator() = IRB.GetInsertBlock();
         It.getInstructionIterator() = IRB.GetInsertPoint();
@@ -1443,8 +1517,6 @@ bool CPI::runOnFunction(Function &F) {
         Value *RealOp = IRB.CreateBitCast(CI, RealTy->getPointerTo());
         Value *Size = CI->getArgOperand(1);
 		Value *PPt = NULL;
-        //Value *PPt = insertProfilePoint(IRB, CI,
-                                       // "realloc-ty-loop", IRB.getInt64(0));
         buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
         It.getBasicBlockIterator() = IRB.GetInsertBlock();
         It.getInstructionIterator() = IRB.GetInsertPoint();
@@ -1459,8 +1531,6 @@ bool CPI::runOnFunction(Function &F) {
 
         IRB.SetInsertPoint(CI->getNextNode());
         IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-
-        //insertProfilePoint(IRB, CI, "realloc", CI->getArgOperand(1));
         IRB.CreateCall4(IF.CPIReallocFn, CI, CI->getArgOperand(1),
                         CI->getArgOperand(0), SizeOld);
       }
@@ -1484,8 +1554,7 @@ bool CPI::runOnFunction(Function &F) {
 
         //IRB.SetInsertPoint(NotNullBB, NotNullBB->begin());
         CondBB->back().eraseFromParent();
-		Value *PPt = NULL;
-        //Value *PPt = insertProfilePoint(IRB, CI, N + "-fixup");
+		Value *PPt = NULL;       
         buildMetadataReload(IRB, Ptr, NULL, NULL, PPt);
         It.getBasicBlockIterator() = NextBB;
         It.getInstructionIterator() = NextI;
@@ -1558,14 +1627,8 @@ Function *CPI::createGlobalsReload(Module &M, StringRef N,
   IRB.SetInsertPoint(Entry);
 
   Instruction *CI = IRB.CreateCall(IF.CPIInitFn);
-
-  /*
-  IRB.CreateCall(IF.CPIDumpFn, IRB.CreateIntToPtr(IRB.getInt64(0),
-                                           IRB.getInt8PtrTy()->getPointerTo()));
-                                           */
-	  Value *PPt = NULL;
-  //Value *PPt = insertProfilePoint(IRB, CI, "globals", IRB.getInt64(0));
-
+  
+  Value *PPt = NULL;  
   IRB.CreateRetVoid();
   IRB.SetInsertPoint(IRB.GetInsertBlock(),
                      IRB.GetInsertBlock()->getTerminator());
