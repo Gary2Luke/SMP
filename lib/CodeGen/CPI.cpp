@@ -1619,7 +1619,9 @@ bool CPI::runOnFunction(Function &F) {
 	  //Value *const222 = Builder2.getInt64(0x0);
 	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");
 	  //Builder2.CreateCall2(IF.CPISetFn, Loc, Val222);
-	  break;
+
+	/*不能加break，莫非函数真不止一个返回地址？？？？？*/
+	  //break;
    }
           
  

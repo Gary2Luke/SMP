@@ -15,7 +15,7 @@
 # define CPI_USE_SEGMENT    // Use segment register
 # define CPI_MMAP_MIN_ADDR 0x1000 // Minimum mmap'able address
 
-#define CPI_DEBUG       // Debug output
+// #define CPI_DEBUG       // Debug output
 // #define CPI_NOINLINE       // Disable inlining
 
 
