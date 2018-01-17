@@ -1326,7 +1326,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   if (Args.hasFlag(OPT_fcpi, OPT_fno_cpi, false)) {
     Opts.setCPIProtector(LangOptions::CPI);
     //Opts.setStackProtector(LangOptions::SafeStack); // cpi requires safestack
-  } else if (Args.hasFlag(OPT_fcps, OPT_fno_cps, false)) {
+  } else if (Args.hasFlag(OPT_fsmp, OPT_fno_smp, false)) {
     Opts.setCPIProtector(LangOptions::CPS);
     //Opts.setStackProtector(LangOptions::SafeStack); // cps requires safestack
   }

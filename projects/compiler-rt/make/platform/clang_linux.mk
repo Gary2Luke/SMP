@@ -52,14 +52,14 @@ endif
 # Build runtime libraries for i386.
 ifeq ($(call contains,$(SupportedArches),i386),true)
 Configs += full-i386 profile-i386 san-i386 asan-i386 \
-	   ubsan-i386 ubsan_cxx-i386 cps-i386 cpi-i386 safestack-i386
+	   ubsan-i386 ubsan_cxx-i386 smp-i386 cpi-i386 safestack-i386
 Arch.full-i386 := i386
 Arch.profile-i386 := i386
 Arch.san-i386 := i386
 Arch.asan-i386 := i386
 Arch.ubsan-i386 := i386
 Arch.ubsan_cxx-i386 := i386
-Arch.cps-i386 := i386
+Arch.smp-i386 := i386
 Arch.cpi-i386 := i386
 Arch.safestack-i386 := i386
 endif
@@ -68,7 +68,7 @@ endif
 ifeq ($(call contains,$(SupportedArches),x86_64),true)
 Configs += full-x86_64 profile-x86_64 san-x86_64 asan-x86_64 tsan-x86_64 \
            msan-x86_64 ubsan-x86_64 ubsan_cxx-x86_64 \
-	   cps-x86_64 cpi-x86_64 safestack-x86_64
+	   smp-x86_64 cpi-x86_64 safestack-x86_64
 Arch.full-x86_64 := x86_64
 Arch.profile-x86_64 := x86_64
 Arch.san-x86_64 := x86_64
@@ -77,7 +77,7 @@ Arch.tsan-x86_64 := x86_64
 Arch.msan-x86_64 := x86_64
 Arch.ubsan-x86_64 := x86_64
 Arch.ubsan_cxx-x86_64 := x86_64
-Arch.cps-x86_64 := x86_64
+Arch.smp-x86_64 := x86_64
 Arch.cpi-x86_64 := x86_64
 Arch.safestack-x86_64 := x86_64
 endif
@@ -111,9 +111,9 @@ CFLAGS.ubsan-x86_64 := $(CFLAGS) -m64 -fPIE -fno-builtin -fno-rtti
 CFLAGS.ubsan_cxx-i386 := $(CFLAGS) -m32 -fPIE -fno-builtin
 CFLAGS.ubsan_cxx-x86_64 := $(CFLAGS) -m64 -fPIE -fno-builtin
 
-CFLAGS.cps-i386 := $(CFLAGS) -m32 -fPIE -fno-builtin -g -DNDEBUG \
-		    -fno-exceptions -fno-rtti -fno-cps -fno-stack-protector -flto
-CFLAGS.cps-x86_64 := $(CFLAGS) -m64 -fPIE -fno-builtin -g -DNDEBUG \
+CFLAGS.smp-i386 := $(CFLAGS) -m32 -fPIE -fno-builtin -g -DNDEBUG \
+		    -fno-exceptions -fno-rtti -fno-smp -fno-stack-protector -flto
+CFLAGS.smp-x86_64 := $(CFLAGS) -m64 -fPIE -fno-builtin -g -DNDEBUG \
 		      -fno-exceptions -fno-rtti -fno-cpi -fno-stack-protector -flto
 
 CFLAGS.cpi-i386 := $(CFLAGS) -DCPI_BOUNDS -m32 -fPIE -fno-builtin -g -DNDEBUG \
@@ -121,8 +121,8 @@ CFLAGS.cpi-i386 := $(CFLAGS) -DCPI_BOUNDS -m32 -fPIE -fno-builtin -g -DNDEBUG \
 CFLAGS.cpi-x86_64 := $(CFLAGS) -DCPI_BOUNDS -m64 -fPIE -fno-builtin -g -DNDEBUG \
 			  -fno-exceptions -fno-rtti -fno-cpi -fno-stack-protector -flto
 
-RANLIB.cps-i386 := ar -s --plugin=$(dir $(CC))../lib/LLVMgold.so
-RANLIB.cps-x86_64 := ar -s --plugin=$(dir $(CC))../lib/LLVMgold.so
+RANLIB.smp-i386 := ar -s --plugin=$(dir $(CC))../lib/LLVMgold.so
+RANLIB.smp-x86_64 := ar -s --plugin=$(dir $(CC))../lib/LLVMgold.so
 RANLIB.cpi-i386 := ar -s --plugin=$(dir $(CC))../lib/LLVMgold.so
 RANLIB.cpi-x86_64 := ar -s --plugin=$(dir $(CC))../lib/LLVMgold.so
 
@@ -168,8 +168,8 @@ FUNCTIONS.ubsan-i386 := $(UbsanFunctions)
 FUNCTIONS.ubsan-x86_64 := $(UbsanFunctions)
 FUNCTIONS.ubsan_cxx-i386 := $(UbsanCXXFunctions)
 FUNCTIONS.ubsan_cxx-x86_64 := $(UbsanCXXFunctions)
-FUNCTIONS.cps-i386 := $(CPIFunctions)
-FUNCTIONS.cps-x86_64 := $(CPIFunctions)
+FUNCTIONS.smp-i386 := $(CPIFunctions)
+FUNCTIONS.smp-x86_64 := $(CPIFunctions)
 FUNCTIONS.cpi-i386 := $(CPIFunctions)
 FUNCTIONS.cpi-x86_64 := $(CPIFunctions)
 FUNCTIONS.safestack-i386 := $(SafeStackFunctions) $(InterceptionFunctions)

@@ -89,7 +89,7 @@ endfunction()
 # FIXME: Universal binaries on OSX cannot contain LLVM bitcode.
 # Therefore, we build per-arch libraries on both OSX and Linux
 foreach(arch ${CPI_SUPPORTED_ARCH})
-  add_compiler_rt_bitcode_runtime(clang_rt.cps-${arch} ${arch}
+  add_compiler_rt_bitcode_runtime(clang_rt.smp-${arch} ${arch}
     SOURCES ${CPI_SOURCES}
     CFLAGS ${CPI_CFLAGS}
     DEPENDS ${CPI_DEPENDS} ${CPI_INLINES})
@@ -97,7 +97,7 @@ foreach(arch ${CPI_SUPPORTED_ARCH})
     SOURCES ${CPI_SOURCES}
     CFLAGS -DCPI_BOUNDS ${CPI_CFLAGS}
     DEPENDS ${CPI_DEPENDS} ${CPI_INLINES})
-  add_compiler_rt_bitcode_file(clang_rt.cps-inlines ${arch}
+  add_compiler_rt_bitcode_file(clang_rt.smp-inlines ${arch}
     SOURCE ${CPI_INLINES}
     CFLAGS ${CPI_INLINES_CFLAGS}
     DEPENDS ${CPI_DEPENDS})

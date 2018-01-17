@@ -436,10 +436,10 @@ def fsanitize_undefined_trap_on_error : Flag<["-"], "fsanitize-undefined-trap-on
                                         Group<f_clang_Group>, Flags<[CC1Option]>;
 def fno_sanitize_undefined_trap_on_error : Flag<["-"], "fno-sanitize-undefined-trap-on-error">,
                                            Group<f_clang_Group>;
-def fcps : Flag<["-"], "fcps">, Group<f_clang_Group>, Flags<[CC1Option]>,
-           HelpText<"Enabel CPS control-flow hijack protection">;
-def fno_cps : Flag<["-"], "fno-cps">, Group<f_clang_Group>, Flags<[CC1Option]>,
-           HelpText<"Disable CPS control-flow hijack protection">;
+def fsmp : Flag<["-"], "fsmp">, Group<f_clang_Group>, Flags<[CC1Option]>,
+           HelpText<"Enabel Shadow Memory protection">;
+def fno_smp : Flag<["-"], "fno-smp">, Group<f_clang_Group>, Flags<[CC1Option]>,
+           HelpText<"Disable Shadow Memory protection">;
 def fcpi : Flag<["-"], "fcpi">, Group<f_clang_Group>, Flags<[CC1Option]>,
            HelpText<"Enabel CPI control-flow hijack protection">;
 def fno_cpi : Flag<["-"], "fno-cpi">, Group<f_clang_Group>, Flags<[CC1Option]>,

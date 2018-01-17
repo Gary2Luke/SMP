@@ -39,3 +39,6 @@ tools/lldb
 tools/lld
 # Sphinx build tree, if building in-source dir.
 docs/_build
+
+tools/clang/*
+!tools/clang/lib
