@@ -2827,7 +2827,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_pthread);
 
   Args.AddAllArgs(CmdArgs, options::OPT_fcpi, options::OPT_fno_cpi);
-  Args.AddAllArgs(CmdArgs, options::OPT_fcps, options::OPT_fno_cps);
+  Args.AddAllArgs(CmdArgs, options::OPT_fsmp, options::OPT_fno_smp);
   if (getToolChain().getDriver().GetCPILevel(Args) &&
       getToolChain().getDriver().IsUsingLTO(Args)) {
     if (Args.hasFlag(options::OPT_fcpi_at_lto,
@@ -2843,7 +2843,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       SmallString<128> LibCPI(getToolChain().getDriver().ResourceDir);
       llvm::sys::path::append(LibCPI, "lib",
                               ((CPILevel == 1 ?
-                                 Twine("clang_rt.cps-inlines.") :
+                                 Twine("clang_rt.smp-inlines.") :
                                  Twine("clang_rt.cpi-inlines.")
                               ) + getToolChain().getArchName() + ".bc"));
       CmdArgs.push_back("-mlink-bitcode-file");
@@ -5565,7 +5565,7 @@ void freebsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
       !Args.hasArg(options::OPT_shared) &&
       !Args.hasArg(options::OPT_nostdlib)) {
     SmallString<128> LibCPI(getToolChain().getDriver().ResourceDir);
-    Twine N = CPILevel == 1 ? "libclang_rt.cps-" : "libclang_rt.cpi-";
+    Twine N = CPILevel == 1 ? "libclang_rt.smp-" : "libclang_rt.cpi-";
     llvm::sys::path::append(LibCPI, "lib", "freebsd",
                             (N + getToolChain().getArchName() + ".a"));
     // CmdArgs.push_back(Args.MakeArgString(LibCPI));
@@ -6146,7 +6146,7 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       !Args.hasArg(options::OPT_shared) &&
       !Args.hasArg(options::OPT_nostdlib)) {
     SmallString<128> LibCPI(getToolChain().getDriver().ResourceDir);
-    Twine N = CPILevel == 1 ? "libclang_rt.cps-" : "libclang_rt.cpi-";
+    Twine N = CPILevel == 1 ? "libclang_rt.smp-" : "libclang_rt.cpi-";
     llvm::sys::path::append(LibCPI, "lib", "linux",
                             (N + getToolChain().getArchName() + ".a"));
     CmdArgs.push_back(Args.MakeArgString(LibCPI));

@@ -286,7 +286,7 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
   std::string CPILibNameStr;
   llvm::raw_string_ostream CPILibName(CPILibNameStr);
   if (CPILevel == 1) {
-    CPILibName << "libclang_rt.cps-" << getArchName() << ".a";
+    CPILibName << "libclang_rt.smp-" << getArchName() << ".a";
   } else if (CPILevel == 2) {
     CPILibName << "libclang_rt.cpi-" << getArchName() << ".a";
   }
