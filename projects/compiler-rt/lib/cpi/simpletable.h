@@ -14,14 +14,6 @@ typedef struct {
 //-----------------------------------------------
 // Constants
 //-----------------------------------------------
-#ifdef __i386__
-#define CPI_TABLE_NUM_ENTRIES (1<<24)
-#define alignment_bits 2
-#define CPI_TABLE_ADDR (1ull<<24)
-
-#define CPI_ADDR_MASK (0x0ull)
-#warning NOT SUPPORTED
-#endif // __i386__
 
 #ifdef __x86_64__
 
