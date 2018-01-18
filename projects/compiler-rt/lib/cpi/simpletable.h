@@ -15,8 +15,6 @@ typedef struct {
 // Constants
 //-----------------------------------------------
 
-#ifdef __x86_64__
-
 # if defined(__gnu_linux__)
 // The following mask works for linux, it maps typical address space into
 // a rage of non-overlapping addresses between 0 and 1<<40.
@@ -28,7 +26,7 @@ typedef struct {
 # endif
 
 #define alignment_bits 3
-#endif //  __x86_64__
+
 
 #define pointer_size sizeof(void *)
 #define pointer_mask (~(pointer_size-1))

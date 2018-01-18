@@ -20,7 +20,7 @@ set(CPI_INLINES_CFLAGS -DCPI_INLINES_ONLY ${CPI_CFLAGS})
 
 # Architectures supported by CPI.
 filter_available_targets(CPI_SUPPORTED_ARCH
-  x86_64 i386)
+  x86_64)
 
 set(CPI_RUNTIME_LIBRARIES)
 
