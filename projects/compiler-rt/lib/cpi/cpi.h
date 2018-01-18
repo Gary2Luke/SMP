@@ -9,7 +9,7 @@
 // =============================================
 
 #define CPI_SIMPLE_TABLE
-//#define CPI_USE_HUGETLB
+// #define CPI_USE_HUGETLB
 
 
 # define CPI_USE_SEGMENT    // Use segment register
@@ -89,22 +89,6 @@
 # define DEBUG(...) do {} while (0)
 #endif // defined(CPI_DEBUG)
 
-// =============================================
-// Type definitions for the CPI interface
-// =============================================
-
-// We use vector type to store bounds because it can be loaded from memory
-// slightly faster (using single instruction) and doesn't occupy general-purpose
-// register when not used (it's stored in SIMD register instead).
-// Note: bounds are inclusive, that is valid_addr \in [bounds[0], bounds[1]]
-
-typedef uintptr_t __llvm__cpi_bounds
-    __attribute__((vector_size(2 * sizeof(uintptr_t)),
-                   aligned(2 * sizeof(uintptr_t))));
-
-#define __llvm__cpi_bounds_infty ((__llvm__cpi_bounds) { 0UL, ~0UL })
-#define __llvm__cpi_bounds_empty ((__llvm__cpi_bounds) { ~0UL, 0UL })
-#define __llvm__cpi_bounds_null ((__llvm__cpi_bounds) { 0UL, 0UL })
 
 // =============================================
 // Declaration of the CPI interface functions
@@ -117,22 +101,6 @@ __CPI_EXPORT void __llvm__cpi_init(void);
 __CPI_INLINE void __llvm__cpi_set(void **fptr, void *val);
 
 __CPI_INLINE void __llvm__cpi_assert(void **fptr, void *val);
-
-__CPI_EXPORT void __llvm__cpi_delete_range(unsigned char *fptr, size_t size);
-
-__CPI_EXPORT void __llvm__cpi_copy_range(unsigned char *fptr_dst,
-                                         unsigned char *fptr, size_t size);
-__CPI_EXPORT void __llvm__cpi_move_range(unsigned char *fptr_dst,
-                                         unsigned char *fptr, size_t size);
-
-__CPI_INLINE unsigned long __llvm__cpi_malloc_size(unsigned char *fptr);
-
-__CPI_INLINE void __llvm__cpi_alloc(unsigned char *fptr);
-
-__CPI_EXPORT void __llvm__cpi_realloc(unsigned char *fptr_new,
-                                      unsigned long size_new,
-                                      unsigned char *fptr_old,
-                                      unsigned long size_old);
 
 __CPI_EXPORT __CPI_NOINLINE void __llvm__cpi_assert_fail();
 

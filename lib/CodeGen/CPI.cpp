@@ -86,17 +86,7 @@ namespace {
   STATISTIC(NumProtectedStores, "Number of protected memory stores");
 
   STATISTIC(NumLoads, "Total number of memory loads");
-  STATISTIC(NumProtectedLoads, "Number of protected memory loads");
-
- 
-
-  STATISTIC(NumMemcpyLikeOps, "Total number of memcpy-like operations");
-  STATISTIC(NumProtectedMemcpyLikeOps,
-            "Number of protected memcpy-like operations");
-
-  STATISTIC(NumAllocFreeOps, "Total number of alloc- and free-like operations");
-  STATISTIC(NumProtectedAllocFreeOps,
-            "Number of protected alloc- and free-like operations");
+  STATISTIC(NumProtectedLoads, "Number of protected memory loads");  
 
   STATISTIC(NumInitStores,
             "Total number of all initialization stores");
@@ -107,6 +97,7 @@ namespace {
   STATISTIC(NumIndirectCalls, "Total number of indirect function calls");
   
   STATISTIC(NumReturnAddress, "Total number of protected return address");
+  STATISTIC(UnsafeStackAlloc, "Total number of UnsafeStackAlloc");
   
 
   static void PrintStat(raw_ostream &OS, Statistic &S) {
@@ -116,15 +107,7 @@ namespace {
   struct CPIInterfaceFunctions {
     Function *CPIInitFn;
     Function *CPISetFn;
-    Function *CPIAssertFn;  
-
-    Function *CPIDeleteRangeFn;
-    Function *CPICopyRangeFn;
-    Function *CPIMoveRangeFn;
-
-    Function *CPIMallocSizeFn;
-    Function *CPIAllocFn;
-    Function *CPIReallocFn;
+    Function *CPIAssertFn;
 
   };
 
@@ -181,9 +164,6 @@ namespace {
     void buildMetadataReload(IRBuilder<true, TargetFolder> &IRB, Value *VPtr,
                              Value *EndPtr, BasicBlock *ExitBB, Value *PPt);
 
-    void buildMetadataReloadLoop(IRBuilder<true, TargetFolder> &IRB,
-                                 Value *VPtr, Value *Size, Value *PPt);
-
     void insertChecks(DenseMap<Value*, Value*> &BM,
                       Value *V, bool IsDereferenced,
                       SetVector<std::pair<Instruction*,
@@ -201,8 +181,7 @@ namespace {
       AU.addRequired<AliasAnalysis>();
     }
 
-    bool runOnFunction(Function &F);
-    bool runOnFunctionBounds(Function &F);
+    bool runOnFunction(Function &F);    
     bool doCPIInitialization(Module &M);
     bool doCPIFinalization(Module &M);
 
@@ -258,7 +237,7 @@ namespace {
 
       if (ShowStats) {
         outs() << "CPI FPTR Statistics:\n";
-
+		
         PrintStat(outs(), NumCalls);
         PrintStat(outs(), NumIndirectCalls);
 
@@ -267,14 +246,10 @@ namespace {
         PrintStat(outs(), NumLoads);
         PrintStat(outs(), NumProtectedLoads);
         PrintStat(outs(), NumInitStores);
-        PrintStat(outs(), NumProtectedInitStores);    
+        PrintStat(outs(), NumProtectedInitStores);
 
-        PrintStat(outs(), NumMemcpyLikeOps);
-        PrintStat(outs(), NumProtectedMemcpyLikeOps);
-        PrintStat(outs(), NumAllocFreeOps);
-        PrintStat(outs(), NumProtectedAllocFreeOps);
-
-	PrintStat(outs(), NumReturnAddress);
+		PrintStat(outs(), NumReturnAddress);
+		PrintStat(outs(), UnsafeStackAlloc);
       }
 
       return true;
@@ -301,10 +276,7 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
   LLVMContext &C = M.getContext();
   Type *VoidTy = Type::getVoidTy(C);
   Type *Int8PtrTy = Type::getInt8PtrTy(C);
-  Type *Int8PtrPtrTy = Int8PtrTy->getPointerTo();
-
-  Type *IntPtrTy = DL->getIntPtrType(C);
-  Type *SizeTy = IntPtrTy;  
+  Type *Int8PtrPtrTy = Int8PtrTy->getPointerTo();   
 
   IF.CPIInitFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_init", VoidTy, NULL));
@@ -315,25 +287,6 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
   IF.CPIAssertFn = CheckInterfaceFunction(M.getOrInsertFunction(
       "__llvm__cpi_assert", VoidTy, Int8PtrPtrTy,
       Int8PtrTy, NULL)); 
-
-  IF.CPIDeleteRangeFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_delete_range", VoidTy, Int8PtrTy, SizeTy, NULL));
-
-  IF.CPICopyRangeFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_copy_range", VoidTy, Int8PtrTy, Int8PtrTy, SizeTy, NULL));
-
-  IF.CPIMoveRangeFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_move_range", VoidTy, Int8PtrTy, Int8PtrTy, SizeTy, NULL));
-
-  IF.CPIMallocSizeFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_malloc_size", SizeTy, Int8PtrTy, NULL));
-
-  IF.CPIAllocFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_alloc", VoidTy, Int8PtrTy, NULL));
-
-  IF.CPIReallocFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_realloc", VoidTy, Int8PtrTy, SizeTy,
-                                     Int8PtrTy, SizeTy, NULL));
 
 }
 
@@ -530,7 +483,7 @@ bool CPI::shouldProtectType(Type *Ty, bool IsStore,
 /// Check whether a given alloca instructino (AI) should be put on the safe
 /// stack or not. The function analyzes all uses of AI and checks whether it is
 /// only accessed in a memory safe way (as decided statically).
-bool IsSafeStackAlloca(AllocaInst *AI, DataLayout *) {
+bool IsSafeStackAlloc(AllocaInst *AI, DataLayout *) {
   // Go through all uses of this alloca and check whether all accesses to the
   // allocated object are statically known to be memory safe and, hence, the
   // object can be placed on the safe stack.
@@ -655,10 +608,11 @@ bool CPI::shouldProtectLoc(Value *Loc, bool IsStore) {
     }
 
     if (AllocaInst *AI = dyn_cast<AllocaInst>(P)) {
-      //if (!IsSafeStackAlloca(AI, DL)) {
+      if (!IsSafeStackAlloc(AI, DL)) {
         // Pointers on unsafe stack must be instrumented
-        //return true;
-      //}
+        ++UnsafeStackAlloc;
+        return true;
+      }
 
       // Pointers on the safe stack can never be overwritten, no need to
       // instrument them.
@@ -799,12 +753,7 @@ void CPI::buildMetadataReload(
           buildMetadataReload(IRB, IRB.CreateGEP(VPtr, Idx),
                               EndPtr, ExitBB, PPt);
         }
-      } else {
-          uint64_t Size = DL->getTypeStoreSize(STy);
-          Value *Idx[2] = { IRB.getInt64(0), IRB.getInt64(0) };
-          buildMetadataReloadLoop(IRB, IRB.CreateGEP(VPtr, Idx),
-                                  IRB.getInt64(Size), PPt);
-      }
+      } 
     }
 
   } else if (VectorType *VecTy = dyn_cast<VectorType>(VTy)) {
@@ -850,176 +799,6 @@ void CPI::buildMetadataReload(
       }
     }
   }
-}
-
-void CPI::buildMetadataReloadLoop(
-                IRBuilder<true, TargetFolder> &IRB, Value *VPtr, Value *Size,
-                Value *PPt) {
-  LLVMContext &C = IRB.getContext();
-  assert(VPtr->getType()->isPointerTy());
-
-  Type *ElTy = cast<PointerType>(VPtr->getType())->getElementType();
-  assert(ElTy->isSized());
-
-  if (ConstantInt *CSize = dyn_cast<ConstantInt>(Size)) {
-    uint64_t CCSize = CSize->getZExtValue();
-    uint64_t ElSize = DL->getTypeAllocSize(ElTy);
-
-    uint64_t NumIter = (CCSize + ElSize - 1) / ElSize;
-    if (NumIter <= CPI_LOOP_UNROLL_TRESHOLD) {
-      BasicBlock *ExitBB = NULL;
-      Value *EndPtr8 = NULL;
-      if (NumIter * ElSize != CCSize) {
-        EndPtr8 = IRB.CreateIntToPtr(
-                   IRB.CreateAdd(IRB.CreatePtrToInt(VPtr, DL->getIntPtrType(C)),
-                   Size), IRB.getInt8PtrTy());
-
-        BasicBlock *ThisBB = IRB.GetInsertBlock();
-        ExitBB = ThisBB->splitBasicBlock(IRB.GetInsertPoint());
-        IRB.SetInsertPoint(ThisBB, ThisBB->getTerminator());
-      }
-
-      for (uint64_t i = 0; i != NumIter; ++i) {
-        buildMetadataReload(IRB, IRB.CreateGEP(VPtr, IRB.getInt64(i)),
-                            EndPtr8, ExitBB, PPt);
-      }
-
-      if (ExitBB) {
-        IRB.SetInsertPoint(ExitBB, ExitBB->begin());
-      }
-      return;
-    }
-  }
-
-  Value *EndPtr = IRB.CreateIntToPtr(
-                   IRB.CreateAdd(IRB.CreatePtrToInt(VPtr, DL->getIntPtrType(C)),
-                   Size), VPtr->getType());
-  Value *EndPtr8 = IRB.CreateBitCast(EndPtr, IRB.getInt8PtrTy());
-
-  Instruction *InsertPt = IRB.GetInsertPoint();
-  BasicBlock *PreHeader = InsertPt->getParent();
-
-  BasicBlock *Header = PreHeader->splitBasicBlock(InsertPt);
-  BasicBlock *Body = Header->splitBasicBlock(InsertPt);
-  BasicBlock *Exit = Body->splitBasicBlock(InsertPt);
-
-  // Create loop condition
-  IRB.SetInsertPoint(Header, Header->begin());
-
-  PHINode *CurPtr = IRB.CreatePHI(VPtr->getType(), 2);
-  CurPtr->addIncoming(VPtr, PreHeader);
-
-  IRB.CreateCondBr(IRB.CreateICmpULT(CurPtr, EndPtr), Body, Exit);
-  Header->back().eraseFromParent();
-
-  // Create loop body
-  IRB.SetInsertPoint(Body, Body->begin());
-  buildMetadataReload(IRB, CurPtr, EndPtr8, Exit, PPt);
-
-  Value *NextPtr = IRB.CreateGEP(CurPtr, IRB.getInt64(1));
-  CurPtr->addIncoming(NextPtr, IRB.GetInsertBlock());
-
-  IRB.CreateBr(Header);
-  IRB.GetInsertBlock()->back().eraseFromParent();
-
-  IRB.SetInsertPoint(Exit, Exit->begin());
-}
-
-static Type *guessRealValueType(Value *VPtr, Function *F) {
-  // Look through the data flow upwards
-
-  Value *V1 = VPtr;
-  do {
-    PointerType *Ty = dyn_cast<PointerType>(V1->getType());
-    if (!Ty)
-      continue;
-
-    Type *ElTy = Ty->getElementType();
-    if (ElTy->isIntegerTy(8) || ElTy->isFunctionTy() || !ElTy->isSized())
-      continue;
-
-    if (ArrayType *ATy = dyn_cast<ArrayType>(ElTy)) {
-      if (ATy->getElementType()->isIntegerTy(8) &&
-          ATy->getNumElements() <= 1)
-        continue; // [1 x i8] are often used as placeholders, ignore them
-    }
-
-    return ElTy;
-
-    // FIXME: support GEP
-  } while (isa<Operator>(V1) &&
-           cast<Operator>(V1)->getOpcode() == Instruction::BitCast &&
-           (V1 = cast<Operator>(V1)->getOperand(0)));
-
-
-  // Look through the data flow downwards
-  for (Value::use_iterator It = VPtr->use_begin(),
-                           Ie = VPtr->use_end(); It != Ie; ++It) {
-    User *U = *It;
-    if (!isa<Operator>(U) ||
-        cast<Operator>(U)->getOpcode() != Instruction::BitCast)
-      continue;
-
-    if (PointerType *Ty = dyn_cast<PointerType>(U->getType())) {
-      if (!Ty->getElementType()->isIntegerTy(8) &&
-          !Ty->getElementType()->isFunctionTy() &&
-          Ty->getElementType()->isSized()) {
-        /*
-        dbgs() << "guessRealType: " << F->getName() << "\n";
-        dbgs() << " op: "; VPtr->dump();
-        dbgs() << " user: "; U->dump();
-        dbgs() << "\n";
-        */
-        return Ty->getElementType();
-      }
-    }
-  }
-
-  return NULL;
-}
-
-static bool canBeVoidStar(Value *VPtr) {
-  for (Value::use_iterator It = VPtr->use_begin(),
-                           Ie = VPtr->use_end(); It != Ie; ++It) {
-    IntrinsicInst *II = dyn_cast<IntrinsicInst>(*It);
-    if (!II || II->getIntrinsicID() != Intrinsic::var_annotation)
-      continue;
-
-    StringRef Str;
-    bool ok = getConstantStringInfo(II->getArgOperand(1), Str);
-    assert(ok);
-
-    if (Str != "tbaa.val")
-      continue;
-
-    MDNode *TBAATag = II->getMetadata("tbaa.val");
-    assert(TBAATag != NULL);
-    assert(TBAATag->getNumOperands() > 1);
-    MDString *TagName = cast<MDString>(TBAATag->getOperand(0));
-    return TagName->getString() == "void pointer" ||
-           TagName->getString() == "function pointer";
-  }
-
-  // In the absence of annotations we must be conservative
-  return true;
-}
-
-static bool canBeUniversalPtr(Value *VPtr) {
-  // FIXME: re-add heuristics we had before
-  Value *V1 = VPtr;
-  do {
-    if(PointerType *Ty = dyn_cast<PointerType>(V1->getType())) {
-      if (ArrayType *ATy = dyn_cast<ArrayType>(Ty->getElementType())) {
-        if (ATy->getElementType()->isIntegerTy(8) &&
-            ATy->getNumElements() <= 1)
-          return true; // [1 x i8] are often used as placeholders, ignore them
-      }
-    }
-  } while (isa<Operator>(V1) &&
-           cast<Operator>(V1)->getOpcode() == Instruction::BitCast &&
-           (V1 = cast<Operator>(V1)->getOperand(0)));
-
-  return canBeVoidStar(VPtr);
 }
 
 static bool isUsedAsFPtr(Value *FPtr) {
@@ -1114,20 +893,6 @@ void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
 #endif
     //llvm_unreachable("Unsupported bounds operation");
   }
-}
-
-static bool isVariableSizedStruct(Type *Ty) {
-  if (StructType *STy = dyn_cast<StructType>(Ty)) {
-    if (STy->isOpaque())
-      return false;
-
-    Type *LastElTy = STy->getElementType(STy->getNumElements()-1);
-    if (ArrayType *ATy = dyn_cast<ArrayType>(LastElTy)) {
-      if (ATy->getArrayNumElements() == 0)
-        return true;
-    }
-  }
-  return false;
 }
 
 bool CPI::runOnFunction(Function &F) {
@@ -1291,300 +1056,7 @@ bool CPI::runOnFunction(Function &F) {
     if (CPSOnly) {
       IRB.CreateCall2(IF.CPISetFn, Loc, Val);
     } 
-  }
-
-  
-
-  // Instrument memory manipulating intrinsics
-  for (inst_iterator It = inst_begin(F), Ie = inst_end(F); It != Ie;) {
-    Instruction *I = &*(It++);
-    CallInst *CI = dyn_cast<CallInst>(I);
-    if (!CI)
-      continue;
-
-    Function *CF = CI->getCalledFunction();
-    StringRef N = CF ? CF->getName() : StringRef();
-
-    bool IsBZero = N.equals("bzero");
-    bool IsMemSet = !IsBZero && (N.startswith("llvm.memset") ||
-        N.equals("memset") || N.equals("__memset") ||
-        N.equals("memset_chk") || N.equals("__memset_chk")); //||
-        //N.startswith("__inline_memset"));
-    bool IsMemCpy = !IsBZero && !IsMemSet && (N.startswith("llvm.memcpy") ||
-        N.equals("memcpy") || N.equals("__memcpy") ||
-        N.equals("memcpy_chk") || N.equals("__memcpy_chk")); // ||
-        //N.startswith("__inline_memcpy"));
-    bool IsMemMove = !IsBZero && !IsMemSet && !IsMemCpy &&
-        (N.startswith("llvm.memmove") ||
-        N.equals("memmove") || N.equals("__memmove") ||
-        N.equals("memmove_chk") || N.equals("__memmove_chk")); // ||
-        //N.startswith("__inline_memmove"));
-    bool IsBCopy = !IsBZero && !IsMemSet && !IsMemCpy && !IsMemMove &&
-        N.equals("bcopy");
-
-    if (IsBZero || IsMemSet || IsMemCpy || IsMemMove || IsBCopy) {
-      //assert(CF->isDeclaration());
-      if (!(!IsBZero || CI->getNumArgOperands() == 2))
-        continue;
-      if (!(IsBZero ||
-             (N.startswith("llvm.") && CI->getNumArgOperands() == 5) ||
-             (N.endswith("_chk") && CI->getNumArgOperands() == 4) ||
-             (CI->getNumArgOperands() == 3)))
-        continue;
-
-      ++NumMemcpyLikeOps;
-
-      // We try to move through bitcasts and hope to succeed.
-      Value *DstOp = CI->getArgOperand(IsBCopy ? 1 : 0);
-      Value *SrcOp = (IsBZero || IsMemSet) ? NULL :
-                      CI->getArgOperand(IsBCopy ? 0 : 1);
-      assert(DstOp->getType()->isPointerTy());
-      Type *RealTy = guessRealValueType(DstOp, &F);
-      Type *RealTy2 = SrcOp ? guessRealValueType(SrcOp, &F) : NULL;
-      bool Force = false;
-
-      if (!RealTy && RealTy2) {
-          RealTy = RealTy2; RealTy2 = NULL;
-      }
-
-      
-
-      if (RealTy && RealTy->isPointerTy() &&
-          cast<PointerType>(RealTy)->getElementType()->isIntegerTy(8) &&
-          canBeUniversalPtr(DstOp)) {
-        RealTy = RealTy2 = NULL;
-      }
-
-
-      if (RealTy && isVariableSizedStruct(RealTy)) {
-        RealTy = RealTy2 = NULL;
-        Force = true;
-      }
-
-
-      if (!RealTy && !RealTy2) {
-
-        // We can't get any useful type info, just i8* which is either
-        // void* or char*. Let's try some heuristics, then do a general
-        // reset or copy operation.
-
-        do {
-          if (!Force) {
-            if (IsMemSet) {
-              Constant *CVal = dyn_cast<Constant>(CI->getArgOperand(1));
-              if (!CVal || !CVal->isNullValue()) {
-                // Do not instrument memset with non-zero value. It is unlikely
-                // that a pointer is initialized to non-zero value using memset.
-                break;
-              }
-            }
-
-            if (!canBeUniversalPtr(DstOp))
-              break; // The value is not void*
-
-            if (IsMemCpy || IsMemMove || IsBCopy) {
-              if (!canBeUniversalPtr(SrcOp))
-                break; // The value is not void*
-            }
-
-            if (MDNode *Tags = CI->getMetadata("tbaa.items")) {
-              bool HasPointers = false;
-              for (unsigned i = 0, e = Tags->getNumOperands(); i != e; ++i) {
-                if (!Tags->getOperand(i)) {
-                  // XXX: this happens sometimes for pointer types
-                  HasPointers = true;
-                  break;
-                  //continue;
-                }
-                StringRef Tag = cast<MDString>(
-                      cast<MDNode>(Tags->getOperand(i))->getOperand(0))
-                    ->getString();
-                if (Tag == "void pointer" || Tag == "function pointer") {
-                  HasPointers = true;
-                  break;
-                }
-              }
-              // FIXME: use pointers layout instead of just HasPointers flag
-              if (!HasPointers)
-                break;
-            }
-          }
-
-          // Looks like we need to instrument this op
-          ++NumProtectedMemcpyLikeOps;
-
-          IRBuilder<> IRB(CI->getNextNode());
-          //IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-
-          Type *Int8PtrTy = IRB.getInt8PtrTy();
-
-          Triple TargetTriple(F.getParent()->getTargetTriple());
-          Type *SizeTy = IRB.getInt64Ty();
-          if (TargetTriple.isArch32Bit())
-            SizeTy = IRB.getInt32Ty();
-
-          if (IsBZero) {           
-            IRB.CreateCall2(IF.CPIDeleteRangeFn,
-                  IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
-                  IRB.CreateZExt(CI->getArgOperand(1), SizeTy));
-          } else if (IsMemSet) {
-            IRB.CreateCall2(IF.CPIDeleteRangeFn,
-                  IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
-                  IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
-          } else if (IsMemCpy) {            
-            IRB.CreateCall3(IF.CPICopyRangeFn,
-                  IRB.CreatePointerCast(CI->getArgOperand(0), Int8PtrTy),
-                  IRB.CreatePointerCast(CI->getArgOperand(1), Int8PtrTy),
-                  IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
-          } else {
-            assert(IsMemMove || IsBCopy);            
-            IRB.CreateCall3(IF.CPIMoveRangeFn,
-                  IRB.CreatePointerCast(DstOp, Int8PtrTy),
-                  IRB.CreatePointerCast(SrcOp, Int8PtrTy),
-                  IRB.CreateZExt(CI->getArgOperand(2), SizeTy));
-          }
-        } while(0);
-
-      } else {
-        assert(RealTy);
-        bool r1 = shouldProtectValue(DstOp, true, CPSOnly, NULL, RealTy);
-        bool r2 = !r1 && RealTy2 &&
-                  shouldProtectValue(DstOp, true, CPSOnly, NULL, RealTy2);
-
-        if (r1 || r2) {
-          ++NumProtectedMemcpyLikeOps;
-
-          // DstOp is not char* and we need to protect it. Do type-based update.
-          TargetFolder TF(DL);
-          IRBuilder<true, TargetFolder> IRB(C, TF);
-          IRB.SetInsertPoint(CI->getNextNode());
-          //IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-
-          Value *RealOp = IRB.CreateBitCast(DstOp,
-                    r1 ? RealTy->getPointerTo() : RealTy2->getPointerTo());
-          Value *Size = CI->getArgOperand(IsBZero ? 1 : 2);
-		  Value *PPt = NULL;          
-          buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
-          It.getBasicBlockIterator() = IRB.GetInsertBlock();
-          It.getInstructionIterator() = IRB.GetInsertPoint();
-        }
-      }
-    } else if (isCallocLikeFn(CI, TLI, true)) {
-      ++NumAllocFreeOps;
-
-      TargetFolder TF(DL);
-      IRBuilder<true, TargetFolder> IRB(C, TF);
-      IRB.SetInsertPoint(CI->getNextNode());
-      //IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-
-      Type *RealTy = guessRealValueType(CI, &F);
-
-      if (RealTy && shouldProtectValue(CI, true, CPSOnly, NULL, RealTy)) {
-        ++NumProtectedAllocFreeOps;
-        Value *RealOp = IRB.CreateBitCast(CI, RealTy->getPointerTo());
-        Value *Size = IRB.CreateMul(CI->getArgOperand(0),
-                                    CI->getArgOperand(1));
-		Value *PPt = NULL;        
-        buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
-        It.getBasicBlockIterator() = IRB.GetInsertBlock();
-        It.getInstructionIterator() = IRB.GetInsertPoint();
-
-      } else if (!RealTy) {
-        ++NumProtectedAllocFreeOps;
-
-
-#warning Pass real size
-        IRB.CreateCall(IF.CPIAllocFn,
-              IRB.CreatePointerCast(CI, IRB.getInt8PtrTy()));
-      }
-
-    }   else if (isReallocLikeFn(CI, TLI, true)) {
-#warning Should not do it on every realloc!
-      ++NumAllocFreeOps;
-
-      TargetFolder TF(DL);
-      IRBuilder<true, TargetFolder> IRB(C, TF);
-
-      Type *RealTy = guessRealValueType(CI, &F);
-      if (!RealTy)
-        RealTy = guessRealValueType(CI->getArgOperand(0), &F);
-
-      if (RealTy && shouldProtectValue(CI, true, CPSOnly, NULL, RealTy)) {
-        ++NumProtectedAllocFreeOps;
-        IRB.SetInsertPoint(CI->getNextNode());
-        IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-
-        Value *RealOp = IRB.CreateBitCast(CI, RealTy->getPointerTo());
-        Value *Size = CI->getArgOperand(1);
-		Value *PPt = NULL;
-        buildMetadataReloadLoop(IRB, RealOp, Size, PPt);
-        It.getBasicBlockIterator() = IRB.GetInsertBlock();
-        It.getInstructionIterator() = IRB.GetInsertPoint();
-
-      } else if (!RealTy) {
-        ++NumProtectedAllocFreeOps;
-        IRB.SetInsertPoint(CI);
-
-        IRBuilder<> IRB(CI);
-        Value *SizeOld =
-            IRB.CreateCall(IF.CPIMallocSizeFn, CI->getArgOperand(0));
-
-        IRB.SetInsertPoint(CI->getNextNode());
-        IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-        IRB.CreateCall4(IF.CPIReallocFn, CI, CI->getArgOperand(1),
-                        CI->getArgOperand(0), SizeOld);
-      }
-    } else if (N == "sigaction") {
-      Value *Ptr = CI->getArgOperand(2);
-      if (Ptr->getType()->isPointerTy() &&
-          cast<PointerType>(Ptr->getType())->getElementType()->isStructTy()) {
-        Instruction *NextI = CI->getNextNode();
-        BasicBlock *CondBB = CI->getParent();
-        BasicBlock *NotNullBB = CondBB->splitBasicBlock(NextI);
-        BasicBlock *NextBB = NotNullBB->splitBasicBlock(NextI);
-
-        TargetFolder TF(DL);
-        IRBuilder<true, TargetFolder> IRB(C, TF);
-
-        IRB.SetInsertPoint(CondBB->getTerminator());
-        IRB.SetCurrentDebugLocation(CI->getDebugLoc());
-        IRB.CreateCondBr(
-              IRB.CreateICmpNE(Ptr, Constant::getNullValue(Ptr->getType())),
-              NotNullBB, NextBB);
-
-        //IRB.SetInsertPoint(NotNullBB, NotNullBB->begin());
-        CondBB->back().eraseFromParent();
-		Value *PPt = NULL;       
-        buildMetadataReload(IRB, Ptr, NULL, NULL, PPt);
-        It.getBasicBlockIterator() = NextBB;
-        It.getInstructionIterator() = NextI;
-      }
-    } 
-  }
-
-  TargetFolder TF(DL);
-  IRBuilder<true, TargetFolder> IRB(C, TF);
-  IRB.SetInsertPoint(F.getEntryBlock().getFirstInsertionPt());
-
-  Value *PPt = NULL;
-
-  // Now, instrument all by-val arguments
-  for (Function::arg_iterator It = F.arg_begin(),
-                              Ie = F.arg_end(); It != Ie; ++It) {
-    Argument *A = It;
-    if (!A->hasByValAttr())
-      continue;
-
-    ++NumStores;
-    assert(A->getType()->isPointerTy());
-    if (!shouldProtectType(cast<PointerType>(A->getType())->getElementType(),
-                           true, CPSOnly))
-      continue;
-
-    ++NumProtectedStores;
-
-    buildMetadataReload(IRB, A, NULL, NULL, PPt);
-  }
+  }  
 
  
 /*  /shadow stack failed??*/
@@ -1606,22 +1078,20 @@ bool CPI::runOnFunction(Function &F) {
 	  	
 	  ++NumReturnAddress;
 	/*有问题 一个函数插桩的返回地址检查不止一个？？？？*/
-/*
+
 	  StringRef AsmStore = "addq $$0x8, %fs:0x28\n\t";// this stack grows up
  	  StringRef ConStore = "";
  	  FunctionType* FtStore = FunctionType::get(Type::getVoidTy(F.getContext()),{}, false);
  	  InlineAsm* Store = InlineAsm::get(FtStore, AsmStore, ConStore, false, false, InlineAsm::AD_ATT);
  	  Builder2.CreateCall(Store);
-          */
+          
 
 	/*不能清0，会出错（例如一个函数调用自己）*/
 	  //errs().write_escaped(F.getName()) << "  ret" << '\n';
 	  //Value *const222 = Builder2.getInt64(0x0);
 	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");
 	  //Builder2.CreateCall2(IF.CPISetFn, Loc, Val222);
-
-	/*不能加break，莫非函数真不止一个返回地址？？？？？*/
-	  //break;
+	  return true;
    }
           
  
@@ -1642,7 +1112,7 @@ Function *CPI::createGlobalsReload(Module &M, StringRef N,
   BasicBlock *Entry = BasicBlock::Create(C, "", F);
   IRB.SetInsertPoint(Entry);
 
-  Instruction *CI = IRB.CreateCall(IF.CPIInitFn);
+  IRB.CreateCall(IF.CPIInitFn);
   
   Value *PPt = NULL;  
   IRB.CreateRetVoid();

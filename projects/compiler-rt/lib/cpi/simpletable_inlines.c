@@ -1,5 +1,5 @@
 //=====================================================
-// Inlined functions for the lookup table
+// Inlined functions for the simpletable
 //=====================================================
 #include <assert.h>
 #include <sys/mman.h>
@@ -38,29 +38,4 @@ void __llvm__cpi_assert(void **ptr_address, void *ptr_value) {
   }
 
 }
-
-
-// =============================================
-// Memory management reletad
-// =============================================
-
-/*** Interface function ***/
-__CPI_INLINE 
-unsigned long __llvm__cpi_malloc_size(unsigned char *fptr) {
-
-    return malloc_usable_size(fptr);
-
-}
-
-// =============================================
-
-/*** Interface function ***/
-__CPI_INLINE 
-void __llvm__cpi_alloc(unsigned char *fptr) {
-#ifdef CPI_DELETE_ON_ALLOC
-    if (CPI_EXPECT((long)fptr))
-        __llvm__cpi_delete_range(fptr, __llvm__cpi_malloc_size(fptr));
-#endif
-}
-
 
