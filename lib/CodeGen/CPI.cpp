@@ -364,36 +364,7 @@ bool CPI::shouldProtectType(Type *Ty, bool IsStore,
         cast<MDString>(TBAATag->getOperand(0))->getString() ==
             "function pointer") {
       return true;
-    }
-
-    if (CPSOnly) {
-      Type *ElTy = PTy->getElementType();
-      if (ElTy->isPointerTy()) {
-      //     cast<PointerType>(ElTy)->getElementType()->isFunctionTy()) {
-        // It could be a vtable pointer
-        if (TBAATag) {
-          assert(TBAATag->getNumOperands() > 1);
-          MDString *TagName = cast<MDString>(TBAATag->getOperand(0));
-          return TagName->getString() == "vtable pointer";
-        }
-      }
-
-      if (IsStore && ElTy->isIntegerTy(8)) {
-        // We want to instrument all stores of void* pointers, as those
-        // might later be casted to protected pointers. Unfortunately,
-        // LLVM represents all void* pointers as i8*, so we do something
-        // very over-approximate here.
-
-        if (TBAATag) {
-          assert(TBAATag->getNumOperands() > 1);
-          MDString *TagName = cast<MDString>(TBAATag->getOperand(0));
-          return TagName->getString() == "void pointer" ||
-                 TagName->getString() == "function pointer";
-        }
-      }
-
-      return false;
-    }
+    }   
 
     if (IsStore && PTy->getElementType()->isIntegerTy(8)) {
       // We want to instrument all stores of void* pointers, as those
@@ -446,13 +417,7 @@ bool CPI::shouldProtectType(Type *Ty, bool IsStore,
       return false;
     } else {
       // Tnis is not a union, go through all fields
-      MDNode *STBAATag = StructsTBAA.lookup(STy);
-      DEBUG(if (!STBAATag) {
-        dbgs() << "CPI: missing struct TBAA for ";
-        if (STy->hasName()) dbgs() << STy->getName();
-        dbgs() << "\n    "; STy->dump();
-        dbgs() << "\n";
-      });
+      MDNode *STBAATag = StructsTBAA.lookup(STy);     
 
       const StructLayout *SL = STBAATag ? DL->getStructLayout(STy) : NULL;
       size_t STBAAIndex = 0;
@@ -473,9 +438,7 @@ bool CPI::shouldProtectType(Type *Ty, bool IsStore,
     }
 
   } else {
-#ifndef NDEBUG
-    Ty->dump();
-#endif
+
     llvm_unreachable("Unhandled type");
   }
 }
@@ -711,35 +674,7 @@ void CPI::buildMetadataReload(
               ->getNumElements() == 0)/* FIXME: requires TBAATag */
            || shouldProtectType(VTy, true, false));
 
-    if (EndPtr) {
-      // Check bounds
-      assert(cast<PointerType>(EndPtr->getType())->getElementType()
-             ->isIntegerTy(8));
-      Value *Cond = IRB.CreateICmpULT(
-            IRB.CreateBitCast(VPtr, IRB.getInt8PtrTy()),
-            EndPtr); // XXX: include ptr size?
-      ConstantInt *CCond = dyn_cast<ConstantInt>(Cond);
-      if (CCond && CCond->isZero())
-        return;
-
-      if (!CCond) {
-        Instruction *InsertPt = IRB.GetInsertPoint();
-        assert(InsertPt);
-
-        BasicBlock *PredBB = InsertPt->getParent();
-        BasicBlock *NextBB = PredBB->splitBasicBlock(InsertPt);
-
-        IRB.SetInsertPoint(PredBB, &PredBB->back());
-        IRB.CreateCondBr(Cond, NextBB, ExitBB);
-        PredBB->back().eraseFromParent();
-
-        assert(InsertPt == NextBB->begin());
-        IRB.SetInsertPoint(NextBB, NextBB->begin());
-      } else {
-        assert(CCond->isOne());
-      }
-    }
-
+   
   
     IRB.CreateCall2(IF.CPISetFn,
         IRB.CreatePointerCast(VPtr, IRB.getInt8PtrTy()->getPointerTo()),
@@ -887,11 +822,6 @@ void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
   } else if (isa<InlineAsm>(V)) {
     // XXX: we can't do much about inline asm. Perhaps we should warn the user ?
 
-  } else {
-#ifndef NDEBUG
-    //V->dump();
-#endif
-    //llvm_unreachable("Unsupported bounds operation");
   }
 }
 
