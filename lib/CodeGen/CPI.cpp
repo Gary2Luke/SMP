@@ -1007,14 +1007,15 @@ bool CPI::runOnFunction(Function &F) {
 	  Builder2.CreateCall2(IF.CPIAssertFn, Loc, Val);
 	  	
 	  ++NumReturnAddress;
-	/*有问题 一个函数插桩的返回地址检查不止一个？？？？*/
+	/*有问题 一个函数插桩的返回地址检查不止一个？？？？  没问题 貌似是函数优化的问题,将一些函数合并了*/
+/*
 
 	  StringRef AsmStore = "addq $$0x8, %fs:0x28\n\t";// this stack grows up
  	  StringRef ConStore = "";
  	  FunctionType* FtStore = FunctionType::get(Type::getVoidTy(F.getContext()),{}, false);
  	  InlineAsm* Store = InlineAsm::get(FtStore, AsmStore, ConStore, false, false, InlineAsm::AD_ATT);
  	  Builder2.CreateCall(Store);
-          
+  */        
 
 	/*不能清0，会出错（例如一个函数调用自己）*/
 	  //errs().write_escaped(F.getName()) << "  ret" << '\n';

@@ -103,8 +103,7 @@ foo$ mkdir build; cd build
 # configure the FCPI release, ensure that the build is of release type, with
 # assertions, and include the binutils dir to enable LLVMgold generation for
 # LTO
-foo/build$ cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON
--DLLVM_BINUTILS_INCDIR=/usr/include ../fcpi-llvm
+foo/build$ cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_BINUTILS_INCDIR=/usr/include ../fcpi-llvm
 foo/build$ make -j8
 
 Now go check what kind of linker is installed on your system. You need to
