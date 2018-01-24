@@ -5570,7 +5570,7 @@ void freebsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
                             (N + getToolChain().getArchName() + ".a"));
     // CmdArgs.push_back(Args.MakeArgString(LibCPI));
   }
-
+/*
   // SafeStack requires its own runtime libraries
   if (ToolChain.getDriver().GetStackProtectorLevel(Args, ToolChain) == 3 
       && !Args.hasArg(options::OPT_shared)
@@ -5583,7 +5583,7 @@ void freebsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-u");
     CmdArgs.push_back("__llvm__safestack_init");
   }
-
+*/
 
   if (!Args.hasArg(options::OPT_nostdlib) &&
       !Args.hasArg(options::OPT_nodefaultlibs)) {

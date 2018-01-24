@@ -1182,7 +1182,7 @@ bool Driver::IsUsingLTO(const ArgList &Args) const {
      // Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, false))
 
  if (Args.hasArg(options::OPT_emit_llvm) ||
-     Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, true))	//改为true 输入不用强制加flto
+     Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, true))	//\B8\C4为true \CA\E4\C8氩籠D3\C3强\D6萍\D3flto
     return true;
 
   // Check for -O4.
@@ -1204,7 +1204,7 @@ int Driver::GetCPILevel(const ArgList &Args) const {
 int Driver::GetStackProtectorLevel(const ArgList &Args,
                                    const ToolChain &TC) const {
   if (GetCPILevel(Args))
-    return 3; // CPI requires safestack
+    return 0; // CPI requires safestack
 
   if (Args.hasFlag(options::OPT_fsafe_stack,
                    options::OPT_fno_safe_stack, false))
