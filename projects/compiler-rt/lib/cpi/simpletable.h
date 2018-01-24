@@ -35,7 +35,7 @@ typedef struct {
 // =============================================
 // Global variable declarations
 // =============================================
-extern int __llvm__cpi_inited;
+extern int __llvm__smp_inited;
 
 
 # define IMM_MODE "ir"
@@ -62,6 +62,6 @@ extern int __llvm__cpi_inited;
   ((((size_t)(ptr_address)) & CPI_ADDR_MASK) * tbl_entry_size_mult)
 
 #define tbl_address(ptr_address) \
-  ((tbl_entry*) (((char*) __llvm__cpi_table) + tbl_offset(ptr_address)))
+  ((tbl_entry*) (((char*) __llvm__smp_table) + tbl_offset(ptr_address)))
 
 #endif // CPI_SIMPLE_TABLE_H

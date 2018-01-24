@@ -11,8 +11,8 @@
 # include <sys/prctl.h>
 
 
-int __llvm__cpi_inited = 0;
-void* __llvm__cpi_table = 0;
+int __llvm__smp_inited = 0;
+void* __llvm__smp_table = 0;
 
 // =============================================
 // Initialization
@@ -21,34 +21,34 @@ void* __llvm__cpi_table = 0;
 /*** Interface function ***/
 __attribute__((constructor(0)))
 __CPI_EXPORT
-void __llvm__cpi_init() {
-  if (__llvm__cpi_inited)
+void __llvm__smp_init() {
+  if (__llvm__smp_inited)
     return;
 
-  __llvm__cpi_inited = 1;
+  __llvm__smp_inited = 1;
 
-  __llvm__cpi_table = mmap((void*) CPI_TABLE_ADDR,
+  __llvm__smp_table = mmap((void*) CPI_TABLE_ADDR,
                       CPI_TABLE_NUM_ENTRIES*sizeof(tbl_entry),
                       PROT_READ | PROT_WRITE,
                       CPI_MMAP_FLAGS, -1, 0);
-  if (__llvm__cpi_table == (void*) -1) {
+  if (__llvm__smp_table == (void*) -1) {
     perror("Cannot map __llvm__cpi_dir");
     abort();
   }
   
-  int res = arch_prctl(ARCH_SET_GS, __llvm__cpi_table);
+  int res = arch_prctl(ARCH_SET_GS, __llvm__smp_table);
   if (res != 0) {
     perror("arch_prctl failed");
     abort();
   }
-  DEBUG("[CPI] Initialization completed\n");
+  DEBUG("[SMP] Initialization completed\n");
   return;
 }
 
 __attribute__((destructor(0)))
 __CPI_EXPORT
-void __llvm__cpi_destroy(void) {
-  DEBUG("[CPI] Finalizatoin completed\n");
+void __llvm__smp_destroy(void) {
+  DEBUG("[SMP] Finalizatoin completed\n");
 }
 
 
@@ -60,9 +60,9 @@ void __llvm__cpi_destroy(void) {
 
 __CPI_EXPORT __CPI_NOINLINE
     __attribute__((noreturn))
-    void __llvm__cpi_assert_fail() {
+    void __llvm__smp_assert_fail() {
 
-  fprintf(stderr, "CPI check fail\n");
+  fprintf(stderr, "SMP check fail\n");
   abort();
 
 }

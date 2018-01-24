@@ -49,7 +49,7 @@ Leve enables the following three command line switches:
 instruction pointer and any other important data on the stack but gives no
 guarantees on heap data at no overhead (ROP protection, no overhead).
 
-"-fcps" to enable Code-Pointer Separation. CPS uses the safe stack to protect
+"-fsmp" to enable Code-Pointer Separation. CPS uses the safe stack to protect
 data on the stack and protects code pointers using bounds and integrity
 checks at negligible overhead (high protection, negligible overhead).
 
@@ -103,7 +103,7 @@ foo$ mkdir build; cd build
 # configure the FCPI release, ensure that the build is of release type, with
 # assertions, and include the binutils dir to enable LLVMgold generation for
 # LTO
-foo/build$ cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_BINUTILS_INCDIR=/usr/include ../fcpi-llvm
+foo/build$ cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_BINUTILS_INCDIR=/usr/include ../SMP
 foo/build$ make -j8
 
 Now go check what kind of linker is installed on your system. You need to

@@ -236,7 +236,7 @@ namespace {
       doCPIFinalization(M);
 
       if (ShowStats) {
-        outs() << "CPI FPTR Statistics:\n";
+        outs() << "SMP Statistics:\n";
 		
         PrintStat(outs(), NumCalls);
         PrintStat(outs(), NumIndirectCalls);
@@ -279,13 +279,13 @@ static void CreateCPIInterfaceFunctions(DataLayout *DL, Module &M,
   Type *Int8PtrPtrTy = Int8PtrTy->getPointerTo();   
 
   IF.CPIInitFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_init", VoidTy, NULL));
+      "__llvm__smp_init", VoidTy, NULL));
 
   IF.CPISetFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_set", VoidTy, Int8PtrPtrTy, Int8PtrTy, NULL));
+      "__llvm__smp_set", VoidTy, Int8PtrPtrTy, Int8PtrTy, NULL));
 
   IF.CPIAssertFn = CheckInterfaceFunction(M.getOrInsertFunction(
-      "__llvm__cpi_assert", VoidTy, Int8PtrPtrTy,
+      "__llvm__smp_assert", VoidTy, Int8PtrPtrTy,
       Int8PtrTy, NULL)); 
 
 }
@@ -1081,7 +1081,7 @@ Function *CPI::createGlobalsReload(Module &M, StringRef N,
 }
 
 bool CPI::doCPIFinalization(Module &M) {
-  Function *F1 = createGlobalsReload(M, "__llvm__cpi.module_init", false);
+  Function *F1 = createGlobalsReload(M, "__llvm__smp.module_init", false);
   appendToGlobalCtors(M, F1, 0);
 
 
@@ -1090,7 +1090,7 @@ bool CPI::doCPIFinalization(Module &M) {
     Function *Main = M.getFunction("main");
     if (Main != NULL && !Main->isDeclaration()) {
       Function *F2 = createGlobalsReload(M,
-                                         "__llvm__cpi.module_pre_main", true);
+                                         "__llvm__smp.module_pre_main", true);
       F2->addFnAttr(Attribute::NoInline);
       CallInst::Create(F2, Twine(),
                  cast<Instruction>(Main->getEntryBlock().getFirstNonPHI()));

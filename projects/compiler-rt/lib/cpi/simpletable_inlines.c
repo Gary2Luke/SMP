@@ -13,7 +13,7 @@
 
 /*** Interface function ***/
 __CPI_INLINE
-void __llvm__cpi_set(void **ptr_address, void *ptr_value) {
+void __llvm__smp_set(void **ptr_address, void *ptr_value) {
 
   DEBUG("[CPI] Store [%p] : %p\n", ptr_address, ptr_value);
 
@@ -24,7 +24,7 @@ void __llvm__cpi_set(void **ptr_address, void *ptr_value) {
 
 /*** Interface function ***/
 __CPI_INLINE
-void __llvm__cpi_assert(void **ptr_address, void *ptr_value) {
+void __llvm__smp_assert(void **ptr_address, void *ptr_value) {
 
   DEBUG("[CPI] Check [%p] : %p \n", ptr_address, ptr_value);
 
@@ -33,7 +33,7 @@ void __llvm__cpi_assert(void **ptr_address, void *ptr_value) {
 
   // If the pointer value does not match -> fail!
   if (CPI_EXPECTNOT(tbl_value != ptr_value)) {
-    __llvm__cpi_assert_fail();
+    __llvm__smp_assert_fail();
 
   }
 

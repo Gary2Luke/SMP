@@ -96,13 +96,13 @@
 
 // Implementation dependent functions
 
-__CPI_EXPORT void __llvm__cpi_init(void);
+__CPI_EXPORT void __llvm__smp_init(void);
 
-__CPI_INLINE void __llvm__cpi_set(void **fptr, void *val);
+__CPI_INLINE void __llvm__smp_set(void **fptr, void *val);
 
-__CPI_INLINE void __llvm__cpi_assert(void **fptr, void *val);
+__CPI_INLINE void __llvm__smp_assert(void **fptr, void *val);
 
-__CPI_EXPORT __CPI_NOINLINE void __llvm__cpi_assert_fail();
+__CPI_EXPORT __CPI_NOINLINE void __llvm__smp_assert_fail();
 
 
 // =============================================
