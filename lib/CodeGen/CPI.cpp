@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "cpi"
+#define DEBUG_TYPE "smp"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
@@ -790,7 +790,7 @@ void CPI::insertChecks(DenseMap<Value*, Value*> &BM,
       ++NumProtectedLoads;
       IRBuilder<> IRB(LI->getNextNode());
       IRB.SetCurrentDebugLocation(LI->getDebugLoc());
-            
+         // outs() << " " << IRB.CreatePointerCast(LI->getPointerOperand(),IRB.getInt8PtrTy()->getPointerTo()) << "		" << IRB.CreatePointerCast(LI, IRB.getInt8PtrTy()) << "\n";  
         IRB.CreateCall2(IF.CPIAssertFn,
               IRB.CreatePointerCast(LI->getPointerOperand(),
                                     IRB.getInt8PtrTy()->getPointerTo()),
@@ -962,6 +962,7 @@ bool CPI::runOnFunction(Function &F) {
     }
   }
 
+
   // Cache bounds information for every value in the function
   DenseMap<Value*, Value*> BoundsMap;
   SetVector<std::pair<Instruction*, Instruction*> > ReplMap;
@@ -989,25 +990,47 @@ bool CPI::runOnFunction(Function &F) {
   }  
 
  
-/*  /shadow stack failed??*/
+
+	/*  /shadow stack failed??*/
 
     for (Function::iterator I = F.begin(), E = F.end(); I != E;) {
 	  Module *MM = F.getParent();
 	  BasicBlock *BB = &*I++;
 	  ReturnInst *RI = dyn_cast<ReturnInst>(BB->getTerminator());
 	  if (!RI)
-		continue;
-	  IRBuilder<> B2(&F.getEntryBlock().front());
-	  Value *RetAddr = B2.CreateCall(Intrinsic::getDeclaration(MM, Intrinsic::returnaddress),B2.getInt32(0), "returnaddr");
-	  Value *Loc = B2.CreateBitCast(RetAddr, Int8PtrPtrTy);
-	  Value *Val = B2.CreateBitCast(RetAddr, Int8PtrTy);		  	  
+		continue;	
+	
+	  Instruction *begin = &F.getEntryBlock().front();
+	  IRBuilder<> B2(begin);	
+	  Type *Int32Ty = Type::getInt32Ty(F.getContext());
+	Type *Int64Ty = Type::getInt64Ty(F.getContext());
+	  Value *RetAddr = B2.CreateCall(Intrinsic::getDeclaration(MM, Intrinsic::returnaddress), ConstantInt::get(Int32Ty, 0), "returnaddr");
+	  Value *Loc = B2.CreateBitCast(RetAddr, Int8PtrPtrTy);		  
+	  Value *Val = B2.CreateBitCast(RetAddr, Int8PtrTy);		 	  
           B2.CreateCall2(IF.CPISetFn, Loc, Val);
 
-	  IRBuilder<> Builder2(RI);	  
-	  Builder2.CreateCall2(IF.CPIAssertFn, Loc, Val);
-	  	
+	/*直接获取返回地址会被优化掉. */
+	/*通过获取栈帧FrameAddr（%rbp）来得到返回地址, 实验表明返回地址都存储在0x8（%rbp）*/
+	 IRBuilder<> Builder2(RI);
+	 Value *FrameAddr = Builder2.CreateCall(Intrinsic::getDeclaration(MM, Intrinsic::frameaddress), Builder2.getInt32(0), "FrameAddr");
+	Value *offset = Builder2.getInt64(0x8);
+	Value *tmp = Builder2.CreatePtrToInt(FrameAddr, Int64Ty);
+	Value *tmp2 = Builder2.CreateAdd(offset, tmp);
+	Value *RetAddrAddr = Builder2.CreateIntToPtr(tmp2, Int8PtrTy);
+	Value *RetAddrAddr2 = Builder2.CreateBitCast(RetAddrAddr, Int8PtrPtrTy);
+	  Value *RetAddr2 = Builder2.CreateLoad(RetAddrAddr2);
+	  Value *Loc2 = Builder2.CreateBitCast(RetAddr2, Int8PtrPtrTy);
+	  Value *Val2 = Builder2.CreateBitCast(RetAddr2, Int8PtrTy);		  
+	  Builder2.CreateCall2(IF.CPIAssertFn, Loc2, Val2);
+
+
 	  ++NumReturnAddress;
-	/*有问题 一个函数插桩的返回地址检查不止一个？？？？  没问题 貌似是函数优化的问题,将一些函数合并了*/
+	  break;
+	
+   }
+
+
+	
 /*
 
 	  StringRef AsmStore = "addq $$0x8, %fs:0x28\n\t";// this stack grows up
@@ -1017,15 +1040,12 @@ bool CPI::runOnFunction(Function &F) {
  	  Builder2.CreateCall(Store);
   */        
 
-	/*不能清0，会出错（例如一个函数调用自己）*/
+	/*不能清0，会出错（例如一个函数中间指令调用自己,影子栈中调用自己的话会叠加存储返回地址,SMP则不能）*/
 	  //errs().write_escaped(F.getName()) << "  ret" << '\n';
 	  //Value *const222 = Builder2.getInt64(0x0);
 	  //Value *Val222 = Builder2.CreateIntToPtr(const222, Int8PtrTy, "aa");
 	  //Builder2.CreateCall2(IF.CPISetFn, Loc, Val222);
-	  return true;
-   }
-          
- 
+
 
   return true;
 }

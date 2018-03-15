@@ -354,6 +354,13 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(X86::ST6);
   Reserved.set(X86::ST7);
 
+// Mark r15 for Shadow stack
+ // Reserved.set(X86::R15) ;
+ // Reserved.set(X86::R15B) ;
+ // Reserved.set(X86::R15W) ;
+ // Reserved.set(X86::R15D) ;
+
+
   // Reserve the registers that only exist in 64-bit mode.
   if (!Is64Bit) {
     // These 8-bit registers are part of the x86-64 extension even though their

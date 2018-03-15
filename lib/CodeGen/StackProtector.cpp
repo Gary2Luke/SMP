@@ -31,6 +31,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetLowering.h"
+#include "llvm/IR/IRBuilder.h"
+
 using namespace llvm;
 
 STATISTIC(NumFunProtected, "Number of functions protected");
@@ -109,8 +111,8 @@ bool StackProtector::runOnFunction(Function &Fn) {
   M = F->getParent();
   DT = getAnalysisIfAvailable<DominatorTree>();
 
-  if (!RequiresStackProtector()) return false;
-
+  //if (!RequiresStackProtector()) return false;
+return false;
   ++NumFunProtected;
   return InsertStackProtectors();
 }
@@ -267,36 +269,30 @@ bool StackProtector::InsertStackProtectors() {
     if (!RI) continue;
 
     if (!FailBB) {
-      // Insert code into the entry block that stores the __stack_chk_guard
-      // variable onto the stack:
-      //
-      //   entry:
-      //     StackGuardSlot = alloca i8*
-      //     StackGuard = load __stack_chk_guard
-      //     call void @llvm.stackprotect.create(StackGuard, StackGuardSlot)
-      //
-      PointerType *PtrTy = Type::getInt8PtrTy(RI->getContext());
-      unsigned AddressSpace, Offset;
-      if (TLI->getStackCookieLocation(AddressSpace, Offset)) {
-        Constant *OffsetVal =
-          ConstantInt::get(Type::getInt32Ty(RI->getContext()), Offset);
+	IRBuilder<> B(&F->getEntryBlock().front());
+  LLVMContext &Context = F->getContext();
 
-        StackGuardVar = ConstantExpr::getIntToPtr(OffsetVal,
-                                      PointerType::get(PtrTy, AddressSpace));
-      } else {
-        StackGuardVar = M->getOrInsertGlobal("__stack_chk_guard", PtrTy);
-      }
+if (F->getName().equals("main")){
+    BasicBlock *FBB = &F->getEntryBlock();
+    Instruction *First = FBB->getFirstNonPHIOrDbgOrLifetime();
+    Type * ITy = Type::getInt64Ty(Context);
+    Type * Ty = Type::getInt64PtrTy(Context);
+    Constant* AllocSize = ConstantInt::get(ITy,0x1000);
+    Instruction* Malloc=CallInst::CreateMalloc(First,ITy,Ty,AllocSize, NULL, NULL,"");
 
-      BasicBlock &Entry = F->getEntryBlock();
-      Instruction *InsPt = &Entry.front();
-
-      AI = new AllocaInst(PtrTy, "StackGuardSlot", InsPt);
-      LoadInst *LI = new LoadInst(StackGuardVar, "StackGuard", false, InsPt);
-
-      Value *Args[] = { LI, AI };
-      CallInst::
-        Create(Intrinsic::getDeclaration(M, Intrinsic::stackprotector),
-               Args, "", InsPt);
+    StringRef AsmInit = "mov $0, %r15";
+    StringRef ConInit = "r";
+    FunctionType* FtInit = FunctionType::get(Type::getVoidTy(Context),{Type::getInt8PtrTy(Context)}, false);
+    InlineAsm* Init = InlineAsm::get(FtInit, AsmInit, ConInit, false, false, InlineAsm::AD_ATT);
+    Value *Pointer = B.CreateTruncOrBitCast(Malloc, Type::getInt8PtrTy(Context))  ;
+    B.CreateCall(Init, {Pointer});
+  }
+      Value *RetAddr = B.CreateCall(Intrinsic::getDeclaration(M, Intrinsic::returnaddress),B.getInt32(0), "");	  
+	 StringRef AsmStore = "mov $0, (%r15)\n\t add $$0x8, %r15\n\t";// this stack grows up
+	  StringRef ConStore = "r";
+	  FunctionType* FtStore = FunctionType::get(Type::getVoidTy(Context),{Type::getInt8PtrTy(Context)}, false);
+	  InlineAsm* Store = InlineAsm::get(FtStore, AsmStore, ConStore, false, false, InlineAsm::AD_ATT);
+	  B.CreateCall(Store, {RetAddr});
 
       // Create the basic block to jump to when the guard check fails.
       FailBB = CreateFailBB();
@@ -339,10 +335,18 @@ bool StackProtector::InsertStackProtectors() {
     // block so that it's in the "fall through" position.
     NewBB->moveAfter(BB);
 
-    // Generate the stack protector instructions in the old basic block.
-    LoadInst *LI1 = new LoadInst(StackGuardVar, "", false, BB);
-    LoadInst *LI2 = new LoadInst(AI, "", true, BB);
-    ICmpInst *Cmp = new ICmpInst(*BB, CmpInst::ICMP_EQ, LI1, LI2, "");
+    IRBuilder<> B(BB);
+      // epilogue
+      
+
+       LLVMContext &Context = F->getContext();
+      Value *RetAddr = B.CreateCall(Intrinsic::getDeclaration(M, Intrinsic::returnaddress),B.getInt32(0), "22");
+      StringRef AsmRead = "sub $$0x8, %r15\n\t  mov (%r15), $0\n\t";// this stack drop down
+      StringRef ConRead = "=r";
+      FunctionType* FtRead = FunctionType::get(Type::getInt8PtrTy(Context),{}, false);
+      InlineAsm* Read = InlineAsm::get(FtRead, AsmRead, ConRead, false, false, InlineAsm::AD_ATT);
+      Value *RightAddr = B.CreateCall(Read);    
+      Value *Cmp = B.CreateICmpEQ(RightAddr, RetAddr);
     BranchInst::Create(NewBB, FailBB, Cmp, BB);
   }
 
