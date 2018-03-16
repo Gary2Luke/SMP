@@ -1014,7 +1014,7 @@ bool CPI::runOnFunction(Function &F) {
 	 IRBuilder<> Builder2(RI);
 	 Value *FrameAddr = Builder2.CreateCall(Intrinsic::getDeclaration(MM, Intrinsic::frameaddress), Builder2.getInt32(0), "FrameAddr");
 	Value *offset = Builder2.getInt64(0x8);
-	Value *tmp = Builder2.CreatePtrToInt(FrameAddr, Int64Ty);
+	Value *tmp = Builder2.CreatePtrToInt(FrameAddr, Int64Ty);	
 	Value *tmp2 = Builder2.CreateAdd(offset, tmp);
 	Value *RetAddrAddr = Builder2.CreateIntToPtr(tmp2, Int8PtrTy);
 	Value *RetAddrAddr2 = Builder2.CreateBitCast(RetAddrAddr, Int8PtrPtrTy);
@@ -1022,7 +1022,6 @@ bool CPI::runOnFunction(Function &F) {
 	  Value *Loc2 = Builder2.CreateBitCast(RetAddr2, Int8PtrPtrTy);
 	  Value *Val2 = Builder2.CreateBitCast(RetAddr2, Int8PtrTy);		  
 	  Builder2.CreateCall2(IF.CPIAssertFn, Loc2, Val2);
-
 
 	  ++NumReturnAddress;
 	  break;

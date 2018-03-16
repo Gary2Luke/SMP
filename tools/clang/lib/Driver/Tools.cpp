@@ -2566,11 +2566,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Manually translate -O to -O2 and -O4 to -O3; let clang reject
   // others.
   if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
-    if (A->getOption().matches(options::OPT_O4))
+    if (A->getOption().matches(options::OPT_O4)){
       CmdArgs.push_back("-O3");
+	//llvm::errs() << "-O3\n";
+	}
     else if (A->getOption().matches(options::OPT_O) &&
-             A->getValue()[0] == '\0')
+             A->getValue()[0] == '\0'){
       CmdArgs.push_back("-O2");
+	//llvm::errs() << "-O2\n";
+	}
     else
       A->render(Args, CmdArgs);
   }

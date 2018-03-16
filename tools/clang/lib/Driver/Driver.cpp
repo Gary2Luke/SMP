@@ -1179,11 +1179,13 @@ Action *Driver::ConstructPhaseAction(const ArgList &Args, phases::ID Phase,
 bool Driver::IsUsingLTO(const ArgList &Args) const {
   // Check for -emit-llvm or -flto.
   // if (Args.hasArg(options::OPT_emit_llvm) ||
-     // Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, false))
+      //Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, false))
 
  if (Args.hasArg(options::OPT_emit_llvm) ||
-     Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, true))	//\B8\C4Ϊtrue \CA\E4\C8벻\D3\C3ǿ\D6Ƽ\D3flto
+     Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, true))    //\B8\C4Ϊtrue \CA\E4\C8벻\D3\C3ǿ\D6Ƽ\D3flto    
     return true;
+	
+ 
 
   // Check for -O4.
   if (const Arg *A = Args.getLastArg(options::OPT_O_Group))
